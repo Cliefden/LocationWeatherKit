@@ -1,0 +1,32 @@
+{
+  "latitude": 59.33,
+  "longitude": 18.07,
+  "utc_offset_seconds": 3600,
+  "timezone": "Europe/Stockholm",
+  "timezone_abbreviation": "GMT+1",
+  "hourly": {
+    "time": [1793059200, 1793062800, 1793066400, 1793070000, 1793073600],
+    "temperature_2m": [6.1, 5.8, 5.5, null, 5.9],
+    "pressure_msl": [1018.0, 1017.0, 1016.0, 1015.0, 1014.0],
+    "surface_pressure": [1011.0, 1010.0, 1009.0, 1008.0, 1007.0],
+    "wind_speed_10m": [12.0, 14.0, 16.0, 18.0, null],
+    "wind_gusts_10m": [20.0, 24.0, 28.0, 30.0, null],
+    "wind_direction_10m": [180, 190, 200, 210, 220],
+    "cloud_cover": [100, 95, 80, 60, 40],
+    "precipitation": [0.0, 0.4, 1.2, 0.0],
+    "weather_code": [3, 61, 63, 3, 2]
+  },
+  "daily": {
+    "time": [1793055600, 1793142000],
+    "weather_code": [63, 2],
+    "temperature_2m_max": [8.2, 9.1],
+    "temperature_2m_min": [3.4, null],
+    "precipitation_sum": [4.6, 0.0],
+    "precipitation_probability_max": [90, 10],
+    "wind_speed_10m_max": [24.0, 12.0],
+    "wind_gusts_10m_max": [41.0, 22.0],
+    "wind_direction_10m_dominant": [205, 270],
+    "sunrise": [1793084100, 1793170620],
+    "sunset": [1793116800, 1793203080]
+  }
+}

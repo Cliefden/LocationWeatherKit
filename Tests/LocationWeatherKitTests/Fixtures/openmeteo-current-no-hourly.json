@@ -1,0 +1,17 @@
+{
+  "latitude": 59.33,
+  "longitude": 18.07,
+  "utc_offset_seconds": 3600,
+  "timezone": "Europe/Stockholm",
+  "current": {
+    "time": 1793113200,
+    "interval": 900,
+    "temperature_2m": 9.0,
+    "relative_humidity_2m": 90,
+    "pressure_msl": 1013.0,
+    "wind_speed_10m": 8.0,
+    "wind_direction_10m": 10,
+    "weather_code": 3,
+    "is_day": 0
+  }
+}

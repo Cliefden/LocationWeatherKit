@@ -1,0 +1,53 @@
+{
+  "latitude": 59.33,
+  "longitude": 18.07,
+  "generationtime_ms": 0.12,
+  "utc_offset_seconds": 3600,
+  "timezone": "Europe/Stockholm",
+  "timezone_abbreviation": "GMT+1",
+  "elevation": 22.0,
+  "current_units": {
+    "time": "unixtime",
+    "interval": "seconds",
+    "temperature_2m": "°C",
+    "relative_humidity_2m": "%",
+    "pressure_msl": "hPa",
+    "surface_pressure": "hPa",
+    "wind_speed_10m": "km/h",
+    "wind_gusts_10m": "km/h",
+    "wind_direction_10m": "°",
+    "weather_code": "wmo code",
+    "is_day": "",
+    "cloud_cover": "%"
+  },
+  "current": {
+    "time": 1793102400,
+    "interval": 900,
+    "temperature_2m": 11.4,
+    "relative_humidity_2m": 82,
+    "pressure_msl": 1010.0,
+    "surface_pressure": 1003.0,
+    "wind_speed_10m": 22.0,
+    "wind_gusts_10m": 35.0,
+    "wind_direction_10m": 250,
+    "weather_code": 61,
+    "is_day": 1,
+    "cloud_cover": 90
+  },
+  "hourly_units": {
+    "time": "unixtime",
+    "pressure_msl": "hPa",
+    "surface_pressure": "hPa",
+    "wind_speed_10m": "km/h",
+    "wind_gusts_10m": "km/h",
+    "wind_direction_10m": "°"
+  },
+  "hourly": {
+    "time": [1793080800, 1793084400, 1793088000, 1793091600, 1793095200, 1793098800, 1793102400, 1793106000, 1793109600],
+    "pressure_msl": [1015.0, 1014.6, 1014.0, 1013.0, 1012.0, 1011.0, 1010.0, 1009.5, null],
+    "surface_pressure": [1000.0, 1000.4, 1000.7, 1001.0, 1001.6, 1002.2, 1003.0, 1003.3, 1003.5],
+    "wind_speed_10m": [10.0, 12.0, null, 15.0, 18.0, 20.0, 22.0, 24.0, 25.0],
+    "wind_gusts_10m": [18.0, 20.0, null, null, 30.0, 32.0, 35.0, 38.0, 40.0],
+    "wind_direction_10m": [200, 210, null, null, 230, 240, 250, null, 270]
+  }
+}

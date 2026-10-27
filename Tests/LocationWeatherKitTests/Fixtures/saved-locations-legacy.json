@@ -1,0 +1,19 @@
+[
+  {
+    "id": "5A3B1F44-1D2C-4C1E-9C4A-2E7F7C1E0B01",
+    "name": "Current Location",
+    "latitude": 59.3293,
+    "longitude": 18.0686,
+    "isCurrentLocation": true,
+    "createdAt": 783000000,
+    "timeZoneIdentifier": "Europe/Stockholm"
+  },
+  {
+    "id": "5A3B1F44-1D2C-4C1E-9C4A-2E7F7C1E0B02",
+    "name": "Lake Tahoe",
+    "latitude": 39.0968,
+    "longitude": -120.0324,
+    "isCurrentLocation": false,
+    "createdAt": 783100000
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "count": 2,
+  "units": null,
+  "stations": [
+    {"tidal": true, "greatlakes": false, "shefcode": "SFCC1", "id": "9414290", "name": "San Francisco", "lat": 37.8063, "lng": -122.4659, "state": "CA", "affiliations": "", "portscode": "", "type": "R", "timezonecorr": -8},
+    {"tidal": true, "greatlakes": false, "id": "8518750", "name": "The Battery", "lat": 40.7006, "lng": -74.0142, "state": "NY", "type": "R", "timezonecorr": -5}
+  ]
+}
