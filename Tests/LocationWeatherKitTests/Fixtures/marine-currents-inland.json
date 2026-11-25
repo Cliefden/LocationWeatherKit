@@ -1,0 +1,9 @@
+{
+  "latitude": 61.0,
+  "longitude": 15.0,
+  "hourly": {
+    "time": [1793059200, 1793062800, 1793066400],
+    "ocean_current_velocity": [null, null, null],
+    "ocean_current_direction": [null, null, null]
+  }
+}

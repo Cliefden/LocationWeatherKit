@@ -1,0 +1,8 @@
+{"current_predictions":{"units":"feet, knots","cp":[
+{"Type":"slack","meanFloodDir":210,"Bin":"1","meanEbbDir":40,"Time":"2026-10-27 04:18","Depth":null,"Velocity_Major":0},
+{"Type":"ebb","meanFloodDir":210,"Bin":"1","meanEbbDir":40,"Time":"2026-10-27 01:28","Depth":null,"Velocity_Major":-2.19},
+{"Type":"flood","meanFloodDir":210,"Bin":"1","meanEbbDir":40,"Time":"2026-10-27 06:33","Depth":null,"Velocity_Major":" 1.81"},
+{"Type":"slack","meanFloodDir":210,"Bin":"1","meanEbbDir":40,"Time":"2026-10-27 10:18","Depth":null,"Velocity_Major":0},
+{"Type":"ebb","meanFloodDir":"210","Bin":"1","meanEbbDir":"40.4","Time":"2026-10-27 13:02","Depth":null,"Velocity_Major":-2.0},
+{"Type":"flood","meanFloodDir":210,"Bin":"1","meanEbbDir":40,"Time":"not a date","Depth":null,"Velocity_Major":1.5}
+]}}
