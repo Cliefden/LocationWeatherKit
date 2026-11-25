@@ -40,6 +40,17 @@ public enum Compass {
     public static func abbreviation(degrees: Int) -> String {
         abbreviation(degrees: Double(degrees))
     }
+
+    /// Abbreviation for `degrees`, localized from the package catalog when
+    /// `localized` is true (same as `abbreviation(degrees:)`), else the English
+    /// `englishAbbreviations` entry (apps that show compass points untranslated).
+    public static func abbreviation(degrees: Double, localized: Bool) -> String {
+        localized ? abbreviation(degrees: degrees) : englishAbbreviations[pointIndex(degrees: degrees)]
+    }
+
+    public static func abbreviation(degrees: Int, localized: Bool) -> String {
+        abbreviation(degrees: Double(degrees), localized: localized)
+    }
 }
 
 /// WMO weather interpretation codes, as returned by Open-Meteo's `weather_code`.

@@ -143,6 +143,14 @@ public struct HourlyWeatherSample: Sendable, Hashable, Codable {
         self.precipitation = precipitation
         self.weatherCode = weatherCode
     }
+
+    /// hPa of the given kind: `pressure` (MSL) or `surfacePressure`.
+    public func pressure(of kind: PressureKind) -> Double? {
+        switch kind {
+        case .meanSeaLevel: return pressure
+        case .surface: return surfacePressure
+        }
+    }
 }
 
 /// One local day from Open-Meteo's `daily` block.
@@ -193,14 +201,35 @@ public struct WeatherForecast: Sendable, Hashable, Codable {
     public var utcOffsetSeconds: Int?
     public var hourly: [HourlyWeatherSample]
     public var daily: [DailyWeatherSample]
+    /// The pressure series behind `pressureHistory` and snapshot trends (the
+    /// client's `Configuration.pressureKind`). Defaults to MSL (0.1.0 behaviour
+    /// and cache files). Both series stay available on every `HourlyWeatherSample`.
+    public var pressureKind: PressureKind
 
     public init(fetchedAt: Date, timeZoneIdentifier: String? = nil, utcOffsetSeconds: Int? = nil,
-                hourly: [HourlyWeatherSample], daily: [DailyWeatherSample]) {
+                hourly: [HourlyWeatherSample], daily: [DailyWeatherSample],
+                pressureKind: PressureKind = .meanSeaLevel) {
         self.fetchedAt = fetchedAt
         self.timeZoneIdentifier = timeZoneIdentifier
         self.utcOffsetSeconds = utcOffsetSeconds
         self.hourly = hourly
         self.daily = daily
+        self.pressureKind = pressureKind
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case fetchedAt, timeZoneIdentifier, utcOffsetSeconds, hourly, daily, pressureKind
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        fetchedAt = try container.decode(Date.self, forKey: .fetchedAt)
+        timeZoneIdentifier = try container.decodeIfPresent(String.self, forKey: .timeZoneIdentifier)
+        utcOffsetSeconds = try container.decodeIfPresent(Int.self, forKey: .utcOffsetSeconds)
+        hourly = try container.decode([HourlyWeatherSample].self, forKey: .hourly)
+        daily = try container.decode([DailyWeatherSample].self, forKey: .daily)
+        // Absent in 0.1.0 disk caches.
+        pressureKind = try container.decodeIfPresent(PressureKind.self, forKey: .pressureKind) ?? .meanSeaLevel
     }
 
     public var timeZone: TimeZone? {
@@ -208,23 +237,24 @@ public struct WeatherForecast: Sendable, Hashable, Codable {
             ?? utcOffsetSeconds.flatMap(TimeZone.init(secondsFromGMT:))
     }
 
-    /// Mean-sea-level pressure series from the hourly samples.
+    /// Hourly pressure series of `pressureKind` (mean sea level by default).
     public var pressureHistory: [PressureSample] {
-        hourly.compactMap { s in s.pressure.map { PressureSample(time: s.time, pressure: $0) } }
+        hourly.compactMap { s in s.pressure(of: pressureKind).map { PressureSample(time: s.time, pressure: $0) } }
     }
 
     /// Conditions at `date` (nearest hourly sample within `maxDistance`), with
-    /// the 3-hour pressure trend when the series has a baseline. Nil when `date`
-    /// is outside the forecast. (Lunker's `HourlyConditionsSnapshot.at`.)
+    /// the 3-hour pressure trend (of `pressureKind`) when the series has a
+    /// baseline. Nil when `date` is outside the forecast. (Lunker's
+    /// `HourlyConditionsSnapshot.at`.)
     public func snapshot(at date: Date, maxDistance: TimeInterval = 90 * 60) -> WeatherSnapshot? {
         guard let nearest = hourly.min(by: {
             abs($0.time.timeIntervalSince(date)) < abs($1.time.timeIntervalSince(date))
         }), abs(nearest.time.timeIntervalSince(date)) <= maxDistance else { return nil }
 
-        let trend = nearest.pressure.flatMap {
+        let trend = nearest.pressure(of: pressureKind).flatMap {
             PressureTrend.calculate(at: nearest.time, pressure: $0, history: pressureHistory)
         }
-        return WeatherSnapshot(sample: nearest, pressureTrend: trend)
+        return WeatherSnapshot(sample: nearest, pressureTrend: trend, pressureKind: pressureKind)
     }
 }
 
@@ -233,8 +263,19 @@ public struct WeatherSnapshot: Sendable, Hashable {
     public let sample: HourlyWeatherSample
     /// nil when there is no sample ≥3 h earlier.
     public let pressureTrend: PressureTrend?
+    /// The forecast's `pressureKind`, which the trend was computed from.
+    public let pressureKind: PressureKind
 
+    init(sample: HourlyWeatherSample, pressureTrend: PressureTrend?, pressureKind: PressureKind = .meanSeaLevel) {
+        self.sample = sample
+        self.pressureTrend = pressureTrend
+        self.pressureKind = pressureKind
+    }
+
+    /// hPa, mean sea level (unchanged from 0.1.0; see `selectedPressure`).
     public var pressure: Double? { sample.pressure }
+    /// hPa of `pressureKind` — the value the trend describes.
+    public var selectedPressure: Double? { sample.pressure(of: pressureKind) }
     public var windSpeed: Double? { sample.windSpeed }
     public var cloudCover: Double? { sample.cloudCover }
 }

@@ -1,0 +1,12 @@
+{
+  "latitude": 57.7,
+  "longitude": 11.9,
+  "utc_offset_seconds": 0,
+  "timezone": "GMT",
+  "hourly_units": { "time": "unixtime", "ocean_current_velocity": "km/h", "ocean_current_direction": "°" },
+  "hourly": {
+    "time": [1793059200, 1793062800, 1793066400, 1793070000, 1793073600, 1793077200],
+    "ocean_current_velocity": [1.0, 1.852, null, 3.704, 2.0, 0.5],
+    "ocean_current_direction": [90.0, 180.4, 200.0, null, 270.0, 300.0]
+  }
+}

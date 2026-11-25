@@ -17,14 +17,20 @@ public final class LocationSearch {
         /// Ranking bias region (not a hard filter); Otta biases to northern Europe.
         public var region: MKCoordinateRegion?
         public var resultTypes: MKLocalSearch.ResultType
+        /// When false, transport failures (`NSURLErrorDomain`, cancellation — see
+        /// `TransportError.isTransportError`) are not passed to `errorReporter`.
+        /// `errorMessage` is still set.
+        public var reportsTransportErrors: Bool
 
         public init(
             debounce: Duration = .milliseconds(300),
             minimumQueryLength: Int = 1,
             resultLimit: Int? = nil,
             region: MKCoordinateRegion? = nil,
-            resultTypes: MKLocalSearch.ResultType = .address
+            resultTypes: MKLocalSearch.ResultType = .address,
+            reportsTransportErrors: Bool = true
         ) {
+            self.reportsTransportErrors = reportsTransportErrors
             self.debounce = debounce
             self.minimumQueryLength = minimumQueryLength
             self.resultLimit = resultLimit
@@ -76,7 +82,8 @@ public final class LocationSearch {
                 guard !Task.isCancelled, let self else { return }
                 // "No results" isn't a failure worth reporting.
                 if (error as? MKError)?.code != .placemarkNotFound {
-                    self.errorReporter?("locations.search", error)
+                    TransportError.report(self.errorReporter, "locations.search", error,
+                                          includingTransportErrors: configuration.reportsTransportErrors)
                 }
                 self.errorMessage = Self.friendlyErrorMessage(for: error)
                 self.results = []

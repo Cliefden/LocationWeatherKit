@@ -25,6 +25,10 @@ public actor OpenMeteoClient {
         /// UserDefaults suite for the baselines; nil = `.standard`. (A name rather
         /// than a `UserDefaults`, which isn't `Sendable`, so it can cross into the actor.)
         public var pressureBaselineSuiteName: String?
+        /// When false, plain transport failures (`NSURLErrorDomain`, cancellation —
+        /// see `TransportError.isTransportError`) are not passed to `errorReporter`.
+        /// They are still thrown to the caller.
+        public var reportsTransportErrors: Bool
 
         public init(
             pressureKind: PressureKind = .meanSeaLevel,
@@ -33,8 +37,10 @@ public actor OpenMeteoClient {
             staleForecastLimit: TimeInterval = 24 * 3600,
             forecastDiskCacheDirectory: URL? = nil,
             pressureBaselineKey: String? = "locationweatherkit.weather.pressureBaselines",
-            pressureBaselineSuiteName: String? = nil
+            pressureBaselineSuiteName: String? = nil,
+            reportsTransportErrors: Bool = true
         ) {
+            self.reportsTransportErrors = reportsTransportErrors
             self.pressureKind = pressureKind
             self.currentCacheLifetime = currentCacheLifetime
             self.forecastCacheLifetime = forecastCacheLifetime
@@ -96,13 +102,13 @@ public actor OpenMeteoClient {
         do {
             decoded = try JSONDecoder().decode(OpenMeteoCurrentResponse.self, from: data)
         } catch {
-            errorReporter?("weather.decode", error)
+            report("weather.decode", error)
             throw WeatherError.decodingFailed
         }
 
         let fetchedAt = now()
         guard var weather = Self.makeCurrentWeather(decoded, pressureKind: configuration.pressureKind, fetchedAt: fetchedAt) else {
-            errorReporter?("weather.decode", WeatherError.decodingFailed)
+            report("weather.decode", WeatherError.decodingFailed)
             throw WeatherError.decodingFailed
         }
 
@@ -210,8 +216,23 @@ public actor OpenMeteoClient {
     /// Hourly + daily forecast for `days` days. Served from memory/disk while
     /// younger than `forecastCacheLifetime`; concurrent calls share one download;
     /// when offline, a forecast up to `staleForecastLimit` old is returned.
-    public func forecast(latitude: Double, longitude: Double, days: Int = 14) async throws -> WeatherForecast {
-        let key = "\(CoordinateKey.make(latitude, longitude, decimals: 2))|\(days)"
+    ///
+    /// - Parameter fields: The Open-Meteo variables to request. `.all` (default)
+    ///   is the full hourly + daily set; a subset such as `.wind` (hourly wind
+    ///   only, no daily block) keeps router grid fetches small. Variables not
+    ///   requested are nil in the samples. Each subset is cached separately.
+    ///
+    /// `WeatherForecast.pressureKind` / `pressureHistory` / snapshot trends follow
+    /// `configuration.pressureKind`.
+    public func forecast(
+        latitude: Double,
+        longitude: Double,
+        days: Int = 14,
+        fields: OpenMeteoForecastFields = .all
+    ) async throws -> WeatherForecast {
+        // The full set keeps the 0.1.0 key, so existing disk caches carry over.
+        let fieldsTag = fields == .all ? "" : "|\(fields.cacheTag)"
+        let key = "\(CoordinateKey.make(latitude, longitude, decimals: 2))|\(days)\(fieldsTag)"
         let current = now()
 
         if let cached = await forecastCache.value(for: key) { return cached }
@@ -223,15 +244,16 @@ public actor OpenMeteoClient {
         do {
             let loader = self.loader
             let fetchedAt = current
+            let pressureKind = configuration.pressureKind
             let fresh = try await forecastCache.value(for: key) {
-                try await Self.downloadForecast(latitude: latitude, longitude: longitude, days: days,
-                                                loader: loader, fetchedAt: fetchedAt)
+                try await Self.downloadForecast(latitude: latitude, longitude: longitude, days: days, fields: fields,
+                                                pressureKind: pressureKind, loader: loader, fetchedAt: fetchedAt)
             }
             writeDisk(fresh, key: key)
             return fresh
         } catch {
             if let decodeError = error as? WeatherError, decodeError == .decodingFailed {
-                errorReporter?("weatherForecast.decode", error)
+                report("weatherForecast.decode", error)
             }
             let stale = await forecastCache.staleValue(for: key)?.value ?? readDisk(key: key)
             if let stale, current.timeIntervalSince(stale.fetchedAt) < configuration.staleForecastLimit {
@@ -242,19 +264,25 @@ public actor OpenMeteoClient {
     }
 
     private static func downloadForecast(
-        latitude: Double, longitude: Double, days: Int,
-        loader: any HTTPDataLoader, fetchedAt: Date
+        latitude: Double, longitude: Double, days: Int, fields: OpenMeteoForecastFields,
+        pressureKind: PressureKind, loader: any HTTPDataLoader, fetchedAt: Date
     ) async throws -> WeatherForecast {
-        guard let url = OpenMeteoRequest.forecastURL(latitude: latitude, longitude: longitude, days: days) else {
+        guard let url = OpenMeteoRequest.forecastURL(latitude: latitude, longitude: longitude, days: days, fields: fields) else {
             throw WeatherError.invalidResponse
         }
         let (data, response) = try await loader.loadData(from: url)
         guard HTTPStatus.isSuccess(response) else { throw WeatherError.invalidResponse }
-        return try parseForecast(data, fetchedAt: fetchedAt)
+        return try parseForecast(data, pressureKind: pressureKind, fetchedAt: fetchedAt)
     }
 
-    /// Decodes an hourly/daily forecast payload (pure; testable).
-    public static func parseForecast(_ data: Data, fetchedAt: Date) throws -> WeatherForecast {
+    /// Decodes an hourly/daily forecast payload (pure; testable). `pressureKind`
+    /// picks the series behind `WeatherForecast.pressureHistory` and snapshot
+    /// trends (default MSL, as in 0.1.0).
+    public static func parseForecast(
+        _ data: Data,
+        pressureKind: PressureKind = .meanSeaLevel,
+        fetchedAt: Date
+    ) throws -> WeatherForecast {
         let decoded: OpenMeteoForecastResponse
         do {
             decoded = try JSONDecoder().decode(OpenMeteoForecastResponse.self, from: data)
@@ -304,8 +332,16 @@ public actor OpenMeteoClient {
             timeZoneIdentifier: decoded.timezone,
             utcOffsetSeconds: decoded.utc_offset_seconds,
             hourly: hourly,
-            daily: daily
+            daily: daily,
+            pressureKind: pressureKind
         )
+    }
+
+    // MARK: Errors
+
+    private func report(_ operation: String, _ error: any Error) {
+        TransportError.report(errorReporter, operation, error,
+                              includingTransportErrors: configuration.reportsTransportErrors)
     }
 
     // MARK: Disk cache
@@ -317,8 +353,11 @@ public actor OpenMeteoClient {
     }
 
     private func readDisk(key: String) -> WeatherForecast? {
-        guard let file = cacheFile(key: key), let data = try? Data(contentsOf: file) else { return nil }
-        return try? JSONDecoder().decode(WeatherForecast.self, from: data)
+        guard let file = cacheFile(key: key), let data = try? Data(contentsOf: file),
+              var forecast = try? JSONDecoder().decode(WeatherForecast.self, from: data) else { return nil }
+        // 0.1.0 files carry no kind (decoded as MSL); both series are stored, so re-stamp.
+        forecast.pressureKind = configuration.pressureKind
+        return forecast
     }
 
     private func writeDisk(_ forecast: WeatherForecast, key: String) {
@@ -327,7 +366,7 @@ public actor OpenMeteoClient {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try JSONEncoder().encode(forecast).write(to: file, options: .atomic)
         } catch {
-            errorReporter?("weatherForecast.cacheWrite", error)
+            report("weatherForecast.cacheWrite", error)
         }
     }
 }

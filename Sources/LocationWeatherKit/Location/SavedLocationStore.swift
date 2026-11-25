@@ -16,6 +16,8 @@ public final class SavedLocationStore {
         /// Two named places closer than this (both lat and lon, degrees) are duplicates.
         public var duplicateThresholdDegrees: Double
         /// GPS jitter below this (metres) is ignored for the Current Location entry.
+        /// `Configuration.noJitterFilter` (0, or any value ≤ 0) turns the filter off:
+        /// every fix moves the entry and saves.
         public var currentLocationUpdateThreshold: CLLocationDistance
         /// Moving further than this (metres) drops the Current Location's cached time zone.
         public var timeZoneInvalidationDistance: CLLocationDistance
@@ -41,6 +43,15 @@ public final class SavedLocationStore {
             self.timeZoneInvalidationDistance = timeZoneInvalidationDistance
             self.resolvesTimeZonesOnAdd = resolvesTimeZonesOnAdd
             self.reusesSavedPlaceForFirstFix = reusesSavedPlaceForFirstFix
+        }
+
+        /// `currentLocationUpdateThreshold` value that disables the GPS jitter
+        /// filter (Sextant: every "Use current location" fix moves the entry).
+        public static let noJitterFilter: CLLocationDistance = 0
+
+        /// False when `currentLocationUpdateThreshold` is `noJitterFilter` (or below).
+        public var filtersCurrentLocationJitter: Bool {
+            currentLocationUpdateThreshold > 0
         }
     }
 
@@ -202,7 +213,7 @@ public final class SavedLocationStore {
     /// Creates or moves the GPS "Current Location" entry.
     ///
     /// - Movement below `currentLocationUpdateThreshold` is ignored (no save, no
-    ///   widget reload). Beyond `timeZoneInvalidationDistance` the cached zone is
+    ///   widget reload), unless the threshold is `Configuration.noJitterFilter`. Beyond `timeZoneInvalidationDistance` the cached zone is
     ///   dropped and re-resolved.
     /// - A new entry is inserted first and selected. An update moves it without
     ///   touching the selection unless `select` is true (Sextant's
@@ -214,9 +225,11 @@ public final class SavedLocationStore {
             let old = CLLocation(latitude: locations[index].latitude, longitude: locations[index].longitude)
             let distance = old.distance(from: CLLocation(latitude: latitude, longitude: longitude))
             let selectionChanges = select && selectedLocationId != locations[index].id
-            guard distance >= configuration.currentLocationUpdateThreshold || selectionChanges else { return }
+            let moves = !configuration.filtersCurrentLocationJitter
+                || distance >= configuration.currentLocationUpdateThreshold
+            guard moves || selectionChanges else { return }
 
-            if distance >= configuration.currentLocationUpdateThreshold {
+            if moves {
                 locations[index].latitude = latitude
                 locations[index].longitude = longitude
                 if distance > configuration.timeZoneInvalidationDistance {

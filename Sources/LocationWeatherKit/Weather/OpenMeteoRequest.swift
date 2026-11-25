@@ -47,17 +47,32 @@ public enum OpenMeteoRequest {
     }
 
     /// Hourly + daily forecast for `days` days (Open-Meteo allows up to 16).
-    public static func forecastURL(latitude: Double, longitude: Double, days: Int) -> URL? {
-        guard isValid(latitude: latitude, longitude: longitude), (1...16).contains(days) else { return nil }
-        return url([
+    /// `fields` picks the variables (default: the full set). An empty hourly or
+    /// daily list omits that block; nil when both are empty.
+    public static func forecastURL(
+        latitude: Double,
+        longitude: Double,
+        days: Int,
+        fields: OpenMeteoForecastFields = .all
+    ) -> URL? {
+        guard isValid(latitude: latitude, longitude: longitude), (1...16).contains(days),
+              !(fields.hourly.isEmpty && fields.daily.isEmpty) else { return nil }
+        var items = [
             URLQueryItem(name: "latitude", value: String(latitude)),
             URLQueryItem(name: "longitude", value: String(longitude)),
-            URLQueryItem(name: "hourly", value: forecastHourlyFields.joined(separator: ",")),
-            URLQueryItem(name: "daily", value: forecastDailyFields.joined(separator: ",")),
+        ]
+        if !fields.hourly.isEmpty {
+            items.append(URLQueryItem(name: "hourly", value: fields.hourly.joined(separator: ",")))
+        }
+        if !fields.daily.isEmpty {
+            items.append(URLQueryItem(name: "daily", value: fields.daily.joined(separator: ",")))
+        }
+        items += [
             URLQueryItem(name: "forecast_days", value: String(days)),
             URLQueryItem(name: "timeformat", value: "unixtime"),
             URLQueryItem(name: "timezone", value: "auto"),
-        ])
+        ]
+        return url(items)
     }
 
     static func isValid(latitude: Double, longitude: Double) -> Bool {
@@ -68,6 +83,41 @@ public enum OpenMeteoRequest {
         var components = URLComponents(string: forecastEndpoint)
         components?.queryItems = items
         return components?.url
+    }
+}
+
+/// Which Open-Meteo variables `OpenMeteoClient.forecast` requests. Only names in
+/// `OpenMeteoRequest.forecastHourlyFields` / `forecastDailyFields` are decoded
+/// into `HourlyWeatherSample` / `DailyWeatherSample`; anything else is sent but ignored.
+public struct OpenMeteoForecastFields: Sendable, Hashable {
+    public var hourly: [String]
+    public var daily: [String]
+
+    public init(hourly: [String], daily: [String] = []) {
+        self.hourly = hourly
+        self.daily = daily
+    }
+
+    /// The full hourly + daily set (0.1.0's request).
+    public static let all = OpenMeteoForecastFields(
+        hourly: OpenMeteoRequest.forecastHourlyFields,
+        daily: OpenMeteoRequest.forecastDailyFields
+    )
+
+    /// Hourly 10 m wind speed, gusts and direction only — no daily block
+    /// (weather routers sampling a grid of cells).
+    public static let wind = OpenMeteoForecastFields(
+        hourly: ["wind_speed_10m", "wind_gusts_10m", "wind_direction_10m"]
+    )
+
+    /// Stable, filename-safe tag for cache keys (FNV-1a of the field lists).
+    var cacheTag: String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in (hourly.joined(separator: ",") + ";" + daily.joined(separator: ",")).utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return "f" + String(hash, radix: 16)
     }
 }
 
