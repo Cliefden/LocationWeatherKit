@@ -1,15 +1,17 @@
 # LocationWeatherKit
 
-Shared location stack, Open-Meteo weather and NOAA / Open-Meteo Marine tides for
-the outdoor apps (Lunker, Sextant, Equinox, Otta). Survey item §1.7 in
+Shared location stack, Open-Meteo weather and NOAA / Open-Meteo Marine tides and
+tidal currents for the outdoor apps (Lunker, Sextant, Equinox, Otta). Survey item §1.7 in
 `Celiador/_standard/SHARED_PACKAGES_SURVEY.md`.
 
 - swift-tools 6.0 (Swift 6 language mode), iOS 17 / watchOS 10 / macOS 14 / visionOS 1
 - Apple frameworks only (Foundation, CoreLocation, MapKit, Observation); no dependencies
 - One library product, `LocationWeatherKit`
 - Resources: `Localizable.xcstrings` (strings taken from the Lunker and Sextant catalogs,
-  with every language they already translate) and `NOAATideStations.json` (~3,500 NOAA tide stations, 197 KB)
+  with every language they already translate), `NOAATideStations.json` (~3,500 NOAA tide stations, 197 KB)
+  and `NOAACurrentStations.json` (~2,600 NOAA current stations, 161 KB)
 - Tests use Swift Testing, fixture JSON and an injected `HTTPDataLoader`. No test touches the network.
+- Changes per version: [CHANGELOG.md](CHANGELOG.md). 0.1.x releases are additive only.
 
 ```swift
 .package(url: "https://github.com/Cliefden/LocationWeatherKit.git", from: "0.1.0")
@@ -23,9 +25,10 @@ Widget and watch targets that compile `SavedLocation` today need to link the pac
 | Area | Types |
 |---|---|
 | Location | `LocationProvider`, `SavedLocation`, `LocationSearchResult`, `LocationSearch`, `PlaceNameResolver`, `TimeZoneResolving` / `GeocoderTimeZoneResolver`, `SavedLocationStore` |
-| Weather | `OpenMeteoClient`, `OpenMeteoRequest`, `CurrentWeather`, `WeatherForecast`, `HourlyWeatherSample`, `DailyWeatherSample`, `WeatherSnapshot`, `WindSample`, `PressureSample`, `PressureTrend`, `PressureKind`, `WeatherError`, `Compass`, `WMOWeatherCode`, `Beaufort` |
+| Weather | `OpenMeteoClient`, `OpenMeteoRequest`, `OpenMeteoForecastFields`, `CurrentWeather`, `WeatherForecast`, `HourlyWeatherSample`, `DailyWeatherSample`, `WeatherSnapshot`, `WindSample`, `PressureSample`, `PressureTrend`, `PressureKind`, `WeatherError`, `Compass`, `WMOWeatherCode`, `Beaufort` |
 | Tides | `TideClient`, `TideData`, `TideEvent`, `TideSample`, `TideKind`, `TideState`, `TideSource`, `TideError`, `NOAAStation`, `NOAAStationMatch`, `NOAAStationIndex`, `NOAATideRequest`, `OpenMeteoMarineRequest` |
-| Support | `TTLCache<Key, Value>`, `DayLocationKey`, `HTTPDataLoader`, `ErrorReporter`, `URLSession.boundedTimeouts()`, `GeoDistance`, `UnitConversion` |
+| Currents | `TidalCurrentClient`, `CurrentData`, `CurrentEvent`, `CurrentEventKind`, `CurrentSample`, `CurrentEstimate`, `CurrentSource`, `CurrentError`, `NOAACurrentRequest`, `OpenMeteoMarineRequest.currentsURL` / `parseCurrents`, `NOAAStationIndex.bundledCurrentStations` |
+| Support | `TTLCache<Key, Value>`, `DayLocationKey`, `HTTPDataLoader`, `ErrorReporter`, `TransportError`, `URLSession.boundedTimeouts()`, `GeoDistance`, `UnitConversion` |
 
 ### LocationProvider
 
@@ -53,6 +56,8 @@ let store = SavedLocationStore(
     configuration: .init(),                    // keys "savedLocations" / "selectedLocationId" = today's keys
     errorReporter: { AppLog.reportError($0, $1, logger: AppLog.persistence) }
 )
+// Sextant: every "Use current location" fix moves the GPS entry (no 100 m jitter filter).
+// .init(currentLocationUpdateThreshold: SavedLocationStore.Configuration.noJitterFilter)   // 0 still works; check `filtersCurrentLocationJitter`
 store.onChange = { store in WidgetPublisher.publish(store.selectedLocation) }  // app-owned widget/watch write
 store.onTimeZoneResolved = { _ in Task { await SolarEventData.clearCache() } }
 
@@ -84,8 +89,23 @@ now.pressure; now.pressureTrend; now.windGustsKnots; now.beaufortForce; now.wind
 
 let forecast = try await weather.forecast(latitude: lat, longitude: lon, days: 14)  // 3 h cache, coalesced, stale ≤24 h offline
 forecast.hourly; forecast.daily; forecast.snapshot(at: catchDate)?.pressureTrend
+forecast.pressureKind; forecast.pressureHistory   // follow `pressureKind` (.surface → surface_pressure); MSL by default
+forecast.hourly[0].pressure(of: .surface); snapshot.selectedPressure                 // `pressure` stays MSL
 PressureTrend.calculate(currentPressure:history:readings:now:)                       // the pure rule
+
+// Field subset, e.g. a router sampling a grid of cells (hourly wind only, no daily block; cached per subset):
+let wind = try await weather.forecast(latitude: lat, longitude: lon, days: 3, fields: .wind)
+// or .init(hourly: ["wind_speed_10m", "wind_direction_10m"], daily: [])
 ```
+
+Plain transport failures (offline, timeouts, cancellation) can be kept out of `errorReporter`
+with `reportsTransportErrors: false` on `OpenMeteoClient.Configuration`,
+`TideClient.Configuration`, `TidalCurrentClient.Configuration` and
+`LocationSearch.Configuration` (default `true`, the 0.1.0 behaviour). They are still thrown.
+`TransportError.isTransportError(_:)` is the rule (`NSURLErrorDomain` or `CancellationError`).
+
+`Compass.abbreviation(degrees:)` is localized; `Compass.abbreviation(degrees:localized: false)`
+returns the English point (Sextant shows compass points untranslated).
 
 ### TideClient
 
@@ -98,6 +118,33 @@ TideData.findExtremes(in: samples)
 tides.nearbyStations(latitude: lat, longitude: lon)          // picker list, sync, bundled index
 // TideError.notCoastal → hide tide UI
 ```
+
+### TidalCurrentClient
+
+```swift
+let currents = TidalCurrentClient(configuration: .init(applicationName: "Sextant"))   // NOAA station within 10 km by default
+let now = try await currents.fetchCurrent(latitude: lat, longitude: lon, preferredStationID: pick)
+now.speedKnots; now.directionDegrees; now.compass; now.phase       // phase: .flood / .ebb / .slack (NOAA only)
+now.source.isModelEstimate                                         // true → show "Model estimate — not for navigation"
+if case .noaa(let station, let km) = now.source { /* show station.name and km */ }
+now.upcomingEvents(after: .now)                                    // max flood / max ebb / slack (NOAA)
+now.estimate(at: date)                                             // sine-rule (NOAA) or nearest model hour
+event.kind.localizedName; phase.phaseName                          // "Max flood" / "Flooding" (localized)
+CurrentData.interpolate(events, at: date)                          // the pure NOAA rule
+currents.nearbyStations(latitude: lat, longitude: lon)             // picker list, bundled index
+
+let series = try await currents.modelCurrents(latitude: lat, longitude: lon, days: 3)   // router: hourly model, knots, cached
+CurrentSample.nearest(in: series, to: time)
+// CurrentError.unavailable → hide current UI (no station, no model current; remembered 24 h)
+```
+
+NOAA: `currents_predictions`, `interval=MAX_SLACK` (the only form subordinate stations
+support), `units=english` (knots), the station's `bin`, from 8 h before now for 56 h.
+Weak-and-variable stations are not in the bundled list. Any NOAA failure (including
+"now" outside the predicted window) falls back to the model and is reported as
+`currents.noaa`. Model: Open-Meteo Marine `ocean_current_velocity` (km/h, converted to
+knots) / `ocean_current_direction` (toward), ~8 km grid — it can badly understate tidal
+streams in channels and harbours, so always label it.
 
 ### TTLCache
 
@@ -158,7 +205,11 @@ All apps keep the existing UserDefaults keys and `SavedLocation` JSON shape, so 
 | `Models/PlaceNameResolver.swift` | `PlaceNameResolver` | none |
 | `Models/WeatherService.swift` | `OpenMeteoClient(configuration: .init(pressureKind: .surface, pressureBaselineKey: "sextant.weather.pressureBaselines"))`, or switch to the MSL default (equal at sea level) | `WindForecastSample(speedKnots, gustKnots, directionDegrees)` → `WindSample` (`speedKnots`, `gustsKnots`, `direction`). `windGusts` is now optional: use `windGustsKnots`. `sailingNote` becomes an app extension on `PressureTrend`. Drop the old `sextant.weather.lastPressure*` keys. |
 | `Models/TideService.swift` (`TideService`, `NOAAStationIndex`) | `TideClient(configuration: .init(applicationName: "Sextant"))` | `.noaaStation(id:name:distanceKm:)` → `.noaa(station:distanceKm:)` (`station.id` / `.name`). `.openMeteoModel` → `.model`. `heightDisplay` → `formattedHeight()`. Hourly NOAA heights are now fetched; pass `includeNOAAHourlyHeights: false` to keep hi/lo-only samples. Delete `Resources/NOAATideStations.json` (it ships in the package). |
-| `Models/TidalCurrentService.swift` | **stays** (Sextant-specific) | Use `NOAAStationIndex(bundle: .main, resource: "NOAACurrentStations")`. `NOAAStationIndex.Match` → `NOAAStationMatch` (same `id`/`name`/`distanceKm`/`bin`). It can adopt `HTTPDataLoader` for tests. |
+| `Models/TidalCurrentService.swift` | `TidalCurrentClient(configuration: .init(applicationName: "Sextant", reportsTransportErrors: false))` (0.1.1) | Same rules (10 km, `MAX_SLACK`, 8 h / 56 h, sine rule, 0.2 kt slack). `.noaaStation(id:name:distanceKm:)` → `.noaa(station:distanceKm:)`, `.openMeteoModel` → `.model`. `events` now include the past events that bracket now: use `upcomingEvents(after: .now)`. `CurrentEventKind.localizedName` / `phaseName` ship in the package. `compass` is localized: use `Compass.abbreviation(degrees:localized: false)` for English. `parseNOAA`/`interpolate`/`noaaURL` → `NOAACurrentRequest.parsePredictions` / `CurrentData.interpolate` / `NOAACurrentRequest.predictionsURL`. Delete `Resources/NOAACurrentStations.json` (`NOAAStationIndex.bundledCurrentStations`). Unlike Sextant, an all-null model answer is retried after 24 h. |
+| Routing `OpenMeteoForecastSampler` | `weather.forecast(…, days: 3, fields: .wind)` + `currents.modelCurrents(…, days: 3)` (0.1.1) | Drops the daily block and non-wind hourly fields per grid cell, and the private marine decoder. |
+| `currentLocationUpdateThreshold: 0` | `SavedLocationStore.Configuration.noJitterFilter` (0.1.1) | Same behaviour. |
+| `reportPackageError` URL-domain filter | `reportsTransportErrors: false` on each client's configuration (0.1.1) | Also skips `CancellationError`. |
+| `extension Compass { static func english(degrees:) }` | `Compass.abbreviation(degrees:localized: false)` (0.1.1) | none |
 
 ### Equinox
 
@@ -185,7 +236,7 @@ for each country. **Keep Otta's `LocationStore` and `SavedLocation`.** Pieces th
 ## Stays in the apps (domain-specific)
 
 - **Lunker**: `FishingCondition` / `fishingCondition`, `PressureTrend.fishingNote`, `WeatherModifier` (`DailyWeatherConditions` aggregation, factors, `DayForecast`), solunar scoring, `TideStationPreference`, `PlaceNameResolver.migrateCurrentLocationNames`, `UnitSettings` height formatting, `AppGroup`/`WatchSync` widget and watch publishing, `LocationPickerMenu`.
-- **Sextant**: `TidalCurrentService` (NOAA `currents_predictions` + sine-rule interpolation + Open-Meteo currents, `NOAACurrentStations.json`), `PressureTrend.sailingNote`, sailing-quality scoring, the `SharedStore` snapshot and `WatchLink`.
+- **Sextant**: `PressureTrend.sailingNote`, sailing-quality scoring, the routing `ForecastSampler` grid/snapping, the `SharedStore` snapshot and `WatchLink`. (Tidal currents moved into the package in 0.1.1: `TidalCurrentClient`.)
 - **Equinox**: the onboarding flag, `SunsetQualityForecaster` (MET Norway), solar/moon calculators, `WatchPayload`.
 - **Otta**: country/region detection and mapping, the best-times scorer, its weather condition mapping.
 
@@ -194,6 +245,8 @@ for each country. **Keep Otta's `LocationStore` and `SavedLocation`.** Pieces th
 - `UserDefaults` is not `Sendable`, so `OpenMeteoClient` takes `pressureBaselineSuiteName` and not a `UserDefaults` instance. `SavedLocationStore` is `@MainActor` and takes the instance directly.
 - Three new strings (`LocationProvider.LocationError`) are English-only in the catalog. Everything else reuses the apps' existing translations.
 - To regenerate `NOAATideStations.json`, fetch `https://api.tidesandcurrents.noaa.gov/mdapi/prod/webapi/stations.json?type=tidepredictions` and write it in the compact form `{"stations": [[id, name, lat, lon], …]}`.
+- To regenerate `NOAACurrentStations.json`, fetch `…/mdapi/prod/webapi/stations.json?type=currentpredictions`, drop weak-and-variable stations, keep the shallowest bin per station, and write `{"stations": [[id, name, lat, lon, bin], …]}`.
+- The currents strings (`Max flood`, `Max ebb`, `Slack`, `Flooding`, `Ebbing`, `Near slack` and the two `CurrentError` messages) are translated for every catalog language; sv/de/fr/es come from Sextant's catalog, the rest are machine translations that a native reviewer should check (nautical terms).
 - Build and test:
   ```sh
   DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer swift test --package-path .
