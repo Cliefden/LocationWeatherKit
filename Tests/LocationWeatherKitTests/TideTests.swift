@@ -263,6 +263,22 @@ struct TideClientTests {
         #expect(reported.values == ["tides.noaa"])
     }
 
+    @Test func offlineNOAAFallbackReportingIsConfigurable() async throws {
+        for reportsTransport in [true, false] {
+            let reported = Reported()
+            let loader = StubLoader { url in
+                if url.host() == "api.tidesandcurrents.noaa.gov" { throw URLError(.notConnectedToInternet) }
+                return try .json("marine")
+            }
+            let client = TideClient(
+                configuration: .init(applicationName: "Sextant", reportsTransportErrors: reportsTransport),
+                stations: index, loader: loader, errorReporter: { op, _ in reported.append(op) })
+            let tides = try await client.fetchTides(latitude: 37.807, longitude: -122.466)
+            #expect(tides.source == .model)
+            #expect(reported.values == (reportsTransport ? ["tides.noaa"] : []))
+        }
+    }
+
     @Test func outsideCoverageGoesStraightToModel() async throws {
         let loader = StubLoader(noaaRoutes)
         let client = TideClient(configuration: .init(applicationName: "Lunker"), stations: index, loader: loader)

@@ -80,6 +80,25 @@ struct OpenMeteoRequestTests {
         #expect(OpenMeteoRequest.forecastURL(latitude: 0, longitude: 0, days: 0) == nil)
         #expect(OpenMeteoRequest.forecastURL(latitude: 0, longitude: 0, days: 17) == nil)
     }
+
+    @Test func forecastFieldSubsets() throws {
+        let all = try #require(OpenMeteoRequest.forecastURL(latitude: 1, longitude: 2, days: 3, fields: .all))
+        #expect(all == OpenMeteoRequest.forecastURL(latitude: 1, longitude: 2, days: 3))   // default unchanged
+
+        let wind = try #require(OpenMeteoRequest.forecastURL(latitude: 1, longitude: 2, days: 3, fields: .wind))
+        #expect(wind.queryValue("hourly") == "wind_speed_10m,wind_gusts_10m,wind_direction_10m")
+        #expect(wind.queryValue("daily") == nil)
+        #expect(wind.queryValue("forecast_days") == "3")
+
+        let dailyOnly = try #require(OpenMeteoRequest.forecastURL(
+            latitude: 1, longitude: 2, days: 3, fields: .init(hourly: [], daily: ["sunrise"])))
+        #expect(dailyOnly.queryValue("hourly") == nil)
+        #expect(dailyOnly.queryValue("daily") == "sunrise")
+
+        #expect(OpenMeteoRequest.forecastURL(latitude: 1, longitude: 2, days: 3, fields: .init(hourly: [])) == nil)
+        #expect(OpenMeteoForecastFields.wind.cacheTag == OpenMeteoForecastFields.wind.cacheTag)
+        #expect(OpenMeteoForecastFields.wind.cacheTag != OpenMeteoForecastFields.all.cacheTag)
+    }
 }
 
 @Suite("Open-Meteo decoding")
@@ -155,6 +174,36 @@ struct OpenMeteoDecodingTests {
         let early = try #require(forecast.snapshot(at: utc(1)))
         #expect(early.pressureTrend == nil)       // no sample 3 h earlier
         #expect(forecast.snapshot(at: utc(10)) == nil)
+        #expect(forecast.pressureKind == .meanSeaLevel)
+        #expect(forecast.pressureHistory.first?.pressure == 1018)
+    }
+
+    @Test func forecastSurfacePressureKind() throws {
+        let forecast = try OpenMeteoClient.parseForecast(
+            try Fixture.data("openmeteo-forecast"), pressureKind: .surface, fetchedAt: utc(0))
+        #expect(forecast.pressureKind == .surface)
+        #expect(forecast.pressureHistory.map(\.pressure) == [1011, 1010, 1009, 1008, 1007])
+        #expect(forecast.hourly[0].pressure == 1018)            // both series stay on the samples
+        #expect(forecast.hourly[0].pressure(of: .surface) == 1011)
+        let snap = try #require(forecast.snapshot(at: utc(3)))
+        #expect(snap.pressureKind == .surface)
+        #expect(snap.selectedPressure == 1008)
+        #expect(snap.pressure == 1015)                          // MSL, as in 0.1.0
+        #expect(snap.pressureTrend == .falling)                 // 1011 → 1008
+    }
+
+    @Test func forecastDecodesPre011CacheAsMSL() throws {
+        // A 0.1.0 disk-cache file has no `pressureKind`.
+        let legacy = WeatherForecast(fetchedAt: utc(0), hourly: [HourlyWeatherSample(time: utc(0), pressure: 1000)], daily: [])
+        var json = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as? [String: Any])
+        json["pressureKind"] = nil
+        let decoded = try JSONDecoder().decode(WeatherForecast.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(decoded == legacy)
+        #expect(decoded.pressureKind == .meanSeaLevel)
+
+        var surface = legacy
+        surface.pressureKind = .surface
+        #expect(try JSONDecoder().decode(WeatherForecast.self, from: JSONEncoder().encode(surface)).pressureKind == .surface)
     }
 }
 
@@ -259,6 +308,55 @@ struct OpenMeteoClientTests {
         }
     }
 
+    @Test func surfaceClientForecastAndDiskRestamp() async throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "lwk-forecast-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let loader = StubLoader { _ in try .json("openmeteo-forecast") }
+        // An MSL client writes the cache file…
+        let msl = OpenMeteoClient(configuration: .init(forecastDiskCacheDirectory: dir, pressureBaselineKey: nil),
+                                  loader: loader, now: { utc(0) })
+        #expect(try await msl.forecast(latitude: 59.33, longitude: 18.07, days: 3).pressureKind == .meanSeaLevel)
+        // …and a surface client reading it gets surface pressure, not the stored kind.
+        let surface = OpenMeteoClient(
+            configuration: .init(pressureKind: .surface, forecastDiskCacheDirectory: dir, pressureBaselineKey: nil),
+            loader: loader, now: { utc(0) })
+        let forecast = try await surface.forecast(latitude: 59.33, longitude: 18.07, days: 3)
+        #expect(loader.requests.count == 1)
+        #expect(forecast.pressureKind == .surface)
+        #expect(forecast.pressureHistory.first?.pressure == 1011)
+    }
+
+    @Test func windOnlyForecastIsCachedSeparately() async throws {
+        let loader = StubLoader { _ in try .json("openmeteo-forecast") }
+        let client = OpenMeteoClient(configuration: .init(pressureBaselineKey: nil), loader: loader)
+        _ = try await client.forecast(latitude: 10, longitude: 10, days: 3, fields: .wind)
+        _ = try await client.forecast(latitude: 10, longitude: 10, days: 3, fields: .wind)
+        #expect(loader.requests.count == 1)
+        #expect(loader.requests[0].queryValue("daily") == nil)
+        _ = try await client.forecast(latitude: 10, longitude: 10, days: 3)
+        #expect(loader.requests.count == 2)                    // full set is a different entry
+        #expect(loader.requests[1].queryValue("daily") != nil)
+    }
+
+    @Test func transportErrorsCanBeSkipped() {
+        #expect(TransportError.isTransportError(URLError(.notConnectedToInternet)))
+        #expect(TransportError.isTransportError(URLError(.cancelled)))
+        #expect(TransportError.isTransportError(CancellationError()))
+        #expect(TransportError.isTransportError(NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut)))
+        #expect(!TransportError.isTransportError(WeatherError.decodingFailed))
+        #expect(!TransportError.isTransportError(DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: ""))))
+
+        let reported = Reported()
+        let reporter: ErrorReporter = { op, _ in reported.append(op) }
+        TransportError.report(reporter, "a", URLError(.timedOut), includingTransportErrors: true)
+        TransportError.report(reporter, "b", URLError(.timedOut), includingTransportErrors: false)
+        TransportError.report(reporter, "c", WeatherError.decodingFailed, includingTransportErrors: false)
+        #expect(reported.values == ["a", "c"])
+        #expect(OpenMeteoClient.Configuration().reportsTransportErrors)
+        #expect(TideClient.Configuration(applicationName: "X").reportsTransportErrors)
+        #expect(LocationSearch.Configuration().reportsTransportErrors)
+    }
+
     @Test func concurrentForecastsShareOneDownload() async throws {
         let loader = StubLoader { _ in try .json("openmeteo-forecast") }
         let client = OpenMeteoClient(configuration: .init(pressureBaselineKey: nil), loader: loader)
@@ -276,6 +374,17 @@ struct WeatherHelperTests {
     ])
     func compass(degrees: Double, index: Int) {
         #expect(Compass.pointIndex(degrees: degrees) == index)
+    }
+
+    @Test func compassUnlocalized() {
+        #expect(Compass.abbreviation(degrees: 22.5, localized: false) == "NNE")
+        #expect(Compass.abbreviation(degrees: 270, localized: false) == "W")
+        #expect(Compass.abbreviation(degrees: 90.0, localized: true) == Compass.abbreviation(degrees: 90.0))
+        #expect(Compass.abbreviation(degrees: 90, localized: true) == Compass.abbreviation(degrees: 90))
+        // Every point maps to its English entry.
+        for i in 0..<16 {
+            #expect(Compass.abbreviation(degrees: Double(i) * 22.5, localized: false) == Compass.englishAbbreviations[i])
+        }
     }
 
     @Test func beaufort() {

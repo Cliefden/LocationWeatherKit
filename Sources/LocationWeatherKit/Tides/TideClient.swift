@@ -31,6 +31,10 @@ public actor TideClient {
         public var marineForecastDays: Int
         /// Minimum non-null model samples to treat a point as coastal.
         public var minimumModelSamples: Int
+        /// When false, plain transport failures (`NSURLErrorDomain`, cancellation —
+        /// see `TransportError.isTransportError`) are not passed to `errorReporter`
+        /// (e.g. an offline NOAA attempt that fell back to the model).
+        public var reportsTransportErrors: Bool
 
         public init(
             applicationName: String,
@@ -41,8 +45,10 @@ public actor TideClient {
             noaaRangeHours: Int = 84,
             includeNOAAHourlyHeights: Bool = true,
             marineForecastDays: Int = 3,
-            minimumModelSamples: Int = 6
+            minimumModelSamples: Int = 6,
+            reportsTransportErrors: Bool = true
         ) {
+            self.reportsTransportErrors = reportsTransportErrors
             self.applicationName = applicationName
             self.maxStationDistanceKm = maxStationDistanceKm
             self.cacheLifetime = cacheLifetime
@@ -126,7 +132,7 @@ public actor TideClient {
                 await cache.set(data, for: noaaKey)
                 return data
             } catch {
-                errorReporter?("tides.noaa", error)
+                report("tides.noaa", error)
             }
         }
 
@@ -145,6 +151,11 @@ public actor TideClient {
     public func clearCache() async {
         await cache.removeAll()
         inlandUntil.removeAll()
+    }
+
+    private func report(_ operation: String, _ error: any Error) {
+        TransportError.report(errorReporter, operation, error,
+                              includingTransportErrors: configuration.reportsTransportErrors)
     }
 
     // MARK: NOAA
@@ -206,7 +217,7 @@ public actor TideClient {
         do {
             seaLevel = try OpenMeteoMarineRequest.parseSeaLevel(data)
         } catch {
-            errorReporter?("tides.decode", error)
+            report("tides.decode", error)
             throw error
         }
 

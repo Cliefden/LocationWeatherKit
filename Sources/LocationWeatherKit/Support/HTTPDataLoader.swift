@@ -27,6 +27,29 @@ extension URLSession: HTTPDataLoader {
 /// The first argument is a short, stable operation name such as `"weather.decode"`.
 public typealias ErrorReporter = @Sendable (_ operation: String, _ error: any Error) -> Void
 
+/// Classifies errors for `ErrorReporter` filtering.
+public enum TransportError {
+    /// True for plain transport failures that are not bugs: anything in
+    /// `NSURLErrorDomain` (offline, timeouts, DNS, cancelled requests — `URLError`
+    /// bridges there) and Swift `CancellationError`.
+    public static func isTransportError(_ error: any Error) -> Bool {
+        if error is CancellationError { return true }
+        return (error as NSError).domain == NSURLErrorDomain
+    }
+}
+
+extension TransportError {
+    /// Calls `reporter` unless `error` is a transport error and those are skipped
+    /// (`reportsTransportErrors == false` in a client's configuration).
+    static func report(
+        _ reporter: ErrorReporter?, _ operation: String, _ error: any Error, includingTransportErrors: Bool
+    ) {
+        guard let reporter else { return }
+        if !includingTransportErrors, isTransportError(error) { return }
+        reporter(operation, error)
+    }
+}
+
 enum HTTPStatus {
     /// True for any 2xx response.
     static func isSuccess(_ response: URLResponse) -> Bool {

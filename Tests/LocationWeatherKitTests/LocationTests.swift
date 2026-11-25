@@ -167,6 +167,30 @@ struct SavedLocationStoreTests {
         #expect(store.currentLocationEntry?.timeZoneIdentifier == "Europe/Stockholm")
     }
 
+    @Test func noJitterFilterMovesOnEveryFix() async {
+        defer { suite.tearDown() }
+        #expect(SavedLocationStore.Configuration().filtersCurrentLocationJitter)
+        let config = SavedLocationStore.Configuration(currentLocationUpdateThreshold: SavedLocationStore.Configuration.noJitterFilter)
+        #expect(!config.filtersCurrentLocationJitter)
+        // A literal 0 (what Sextant passed before the named option) means the same.
+        #expect(!SavedLocationStore.Configuration(currentLocationUpdateThreshold: 0).filtersCurrentLocationJitter)
+
+        let store = makeStore(configuration: config)
+        store.updateCurrentLocation(latitude: 59.3293, longitude: 18.0686)
+        await store.resolveMissingTimeZones()
+        var changes = 0
+        store.onChange = { _ in changes += 1 }
+
+        // ~5 m: moved and saved (the default config ignores anything under 100 m).
+        store.updateCurrentLocation(latitude: 59.32935, longitude: 18.0686)
+        #expect(store.currentLocationEntry?.latitude == 59.32935)
+        #expect(changes == 1)
+        // The same fix again still saves (every "Use current location" tap refreshes).
+        store.updateCurrentLocation(latitude: 59.32935, longitude: 18.0686)
+        #expect(changes == 2)
+        #expect(store.currentLocationEntry?.timeZoneIdentifier == "Europe/Stockholm")
+    }
+
     @Test func updateDoesNotStealSelectionUnlessAsked() {
         defer { suite.tearDown() }
         let store = makeStore()
