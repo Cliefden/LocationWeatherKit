@@ -33,7 +33,7 @@ public struct WindSample: Sendable, Hashable, Codable, Identifiable {
     }
 }
 
-/// Current conditions plus ±24 h of hourly pressure and wind.
+/// Current conditions plus hourly pressure and wind around now (±24 h by default).
 /// Superset of Lunker's and Sextant's `WeatherService.WeatherData`.
 public struct CurrentWeather: Sendable, Hashable {
     /// °C.
@@ -60,9 +60,11 @@ public struct CurrentWeather: Sendable, Hashable {
     /// Total cloud cover, % (nil if the API omitted it).
     public var cloudCover: Double?
     public var fetchedAt: Date
-    /// Hourly pressure of `pressureKind`, ±24 h around now (empty if unavailable).
+    /// Hourly pressure of `pressureKind` around now — by default 24 h back and
+    /// 24 h ahead (`OpenMeteoClient.Configuration.currentPastHours` /
+    /// `currentForecastHours`). Empty if unavailable.
     public var pressureHistory: [PressureSample]
-    /// Hourly wind, ±24 h around now (empty if unavailable).
+    /// Hourly wind over the same window (empty if unavailable).
     public var windForecast: [WindSample]
 
     public init(
@@ -247,14 +249,7 @@ public struct WeatherForecast: Sendable, Hashable, Codable {
     /// baseline. Nil when `date` is outside the forecast. (Lunker's
     /// `HourlyConditionsSnapshot.at`.)
     public func snapshot(at date: Date, maxDistance: TimeInterval = 90 * 60) -> WeatherSnapshot? {
-        guard let nearest = hourly.min(by: {
-            abs($0.time.timeIntervalSince(date)) < abs($1.time.timeIntervalSince(date))
-        }), abs(nearest.time.timeIntervalSince(date)) <= maxDistance else { return nil }
-
-        let trend = nearest.pressure(of: pressureKind).flatMap {
-            PressureTrend.calculate(at: nearest.time, pressure: $0, history: pressureHistory)
-        }
-        return WeatherSnapshot(sample: nearest, pressureTrend: trend, pressureKind: pressureKind)
+        WeatherSnapshot.at(date, from: hourly, pressureKind: pressureKind, maxDistance: maxDistance)
     }
 }
 
@@ -270,6 +265,28 @@ public struct WeatherSnapshot: Sendable, Hashable {
         self.sample = sample
         self.pressureTrend = pressureTrend
         self.pressureKind = pressureKind
+    }
+
+    /// Conditions at `date` from a bare hourly series: the nearest sample within
+    /// `maxDistance`, with the 3-hour trend of `pressureKind` when the series has
+    /// a sample at least 3 h earlier (nil otherwise — no baseline means no trend,
+    /// not "stable"). Nil when `date` is outside the series. Same rule as
+    /// `WeatherForecast.snapshot(at:)` and Lunker's `HourlyConditionsSnapshot.at(_:from:)`.
+    public static func at(
+        _ date: Date,
+        from samples: [HourlyWeatherSample],
+        pressureKind: PressureKind = .meanSeaLevel,
+        maxDistance: TimeInterval = 90 * 60
+    ) -> WeatherSnapshot? {
+        guard let nearest = samples.min(by: {
+            abs($0.time.timeIntervalSince(date)) < abs($1.time.timeIntervalSince(date))
+        }), abs(nearest.time.timeIntervalSince(date)) <= maxDistance else { return nil }
+
+        let trend = nearest.pressure(of: pressureKind).flatMap { pressure in
+            let history = samples.compactMap { s in s.pressure(of: pressureKind).map { PressureSample(time: s.time, pressure: $0) } }
+            return PressureTrend.calculate(at: nearest.time, pressure: pressure, history: history)
+        }
+        return WeatherSnapshot(sample: nearest, pressureTrend: trend, pressureKind: pressureKind)
     }
 
     /// hPa, mean sea level (unchanged from 0.1.0; see `selectedPressure`).

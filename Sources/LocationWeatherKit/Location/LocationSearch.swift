@@ -39,7 +39,10 @@ public final class LocationSearch {
         }
     }
 
-    public private(set) var query: String = ""
+    /// The last query passed to `search(_:)`. Settable so a text field can bind to
+    /// it directly (`TextField(text: $search.query)` + `.onChange(of: search.query) { search.search($1) }`,
+    /// Lunker's pattern). Setting it alone does not start a search; `clear()` resets it.
+    public var query: String = ""
     public private(set) var results: [LocationSearchResult] = []
     public private(set) var isSearching = false
     /// Localized, user-facing message for the last failure (nil on success).

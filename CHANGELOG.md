@@ -2,7 +2,41 @@
 
 0.1.x releases are additive: code written against 0.1.0 compiles and behaves the same.
 
-## 0.1.1 (unreleased)
+## 0.1.2 (2026-11-26)
+
+Gaps found in a behavioural diff against Lunker's current location / weather / tide code
+(including Lunker changes made after the package was cut: the 72 h pressure chart window).
+
+### Added
+
+- `OpenMeteoClient.Configuration.currentPastHours` / `currentForecastHours` (default 24 / 24):
+  the hourly window `currentWeather` requests (`past_hours` / `forecast_hours`), so
+  `CurrentWeather.pressureHistory` / `windForecast` can feed a chart reaching further ahead
+  (Lunker: 24 / 72). The trend still uses the latest sample at least 3 h before now.
+- `WeatherSnapshot.at(_:from:pressureKind:maxDistance:)`: the `snapshot(at:)` rule on a bare
+  `[HourlyWeatherSample]` (Lunker's `HourlyConditionsSnapshot.at(_:from:)`).
+  `WeatherForecast.snapshot(at:)` now delegates to it (same results).
+- `TideClient.Configuration.minimumNOAAEvents` (default 2): fewest NOAA high/low events a
+  response needs before the model is tried instead (Lunker: 1; 0 still requires one).
+- `TideClient.Configuration.preferredStationLookup` (default nil): consulted by `fetchTides`
+  when no `preferredStationID` is passed, so every call site honours a saved station pick
+  (Lunker's `TideStationPreference`). An explicit argument wins; nil from the lookup means nearest.
+- `LocationProvider.reportsLocationUnknownErrors` (default false): also pass
+  `CLError.locationUnknown` to `onError` (Lunker reported every failure as `location.fix`).
+- `SavedLocationStore.seedIfEmpty(_:)`: in-memory seed for an empty store (screenshot builds);
+  not saved and no `onChange` until the next edit.
+- `LocationSearch.query` is now settable, so a `TextField` can bind to it (setting it does not
+  search by itself; pair it with `onChange` → `search(_:)`).
+- Tests: `LunkerParityTests` (window, Lunker-format pressure baselines, snapshot rule, single-event
+  NOAA answers, station lookup, bundled station names, picker defaults, in-memory seed, widget
+  payload bytes, bindable query, `locationUnknown` reporting).
+
+### Compatibility
+
+- Defaults reproduce 0.1.1 exactly: the same current-conditions URL (24 / 24), 2 NOAA events,
+  no station lookup, `.locationUnknown` filtered. `query` keeps its name and type.
+
+## 0.1.1 (2026-11-25)
 
 Gaps found while adopting the package in Sextant.
 

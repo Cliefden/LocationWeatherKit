@@ -41,8 +41,12 @@ public final class LocationProvider: NSObject {
     /// Called on every real authorization transition (old, new) — Sextant reports
     /// permission telemetry here.
     @ObservationIgnored public var onAuthorizationChange: ((CLAuthorizationStatus, CLAuthorizationStatus) -> Void)?
-    /// Called for Core Location failures except the transient `.locationUnknown`.
+    /// Called for Core Location failures except the transient `.locationUnknown`
+    /// (unless `reportsLocationUnknownErrors` is true).
     @ObservationIgnored public var onError: ((any Error) -> Void)?
+    /// Also pass `CLError.locationUnknown` to `onError` (Lunker reported every
+    /// failure as `location.fix`). Default false.
+    @ObservationIgnored public var reportsLocationUnknownErrors = false
 
     /// Request a fix automatically as soon as access is granted (the apps' behaviour).
     @ObservationIgnored public var requestsLocationOnAuthorization: Bool
@@ -182,7 +186,7 @@ public final class LocationProvider: NSObject {
     fileprivate func handle(error: any Error) {
         isLoading = false
         lastError = error
-        if (error as? CLError)?.code != .locationUnknown { onError?(error) }
+        if reportsLocationUnknownErrors || (error as? CLError)?.code != .locationUnknown { onError?(error) }
         let mapped: LocationError = (error as? CLError)?.code == .denied ? .notAuthorized : .unavailable
         finishAll(with: .failure(mapped))
     }

@@ -29,6 +29,12 @@ public actor OpenMeteoClient {
         /// see `TransportError.isTransportError`) are not passed to `errorReporter`.
         /// They are still thrown to the caller.
         public var reportsTransportErrors: Bool
+        /// Hours of hourly pressure / wind before now that `currentWeather` requests
+        /// (`past_hours`). The trend needs at least 3.
+        public var currentPastHours: Int
+        /// Hours of hourly pressure / wind after now that `currentWeather` requests
+        /// (`forecast_hours`). Lunker's scrolling pressure chart uses 72.
+        public var currentForecastHours: Int
 
         public init(
             pressureKind: PressureKind = .meanSeaLevel,
@@ -38,7 +44,9 @@ public actor OpenMeteoClient {
             forecastDiskCacheDirectory: URL? = nil,
             pressureBaselineKey: String? = "locationweatherkit.weather.pressureBaselines",
             pressureBaselineSuiteName: String? = nil,
-            reportsTransportErrors: Bool = true
+            reportsTransportErrors: Bool = true,
+            currentPastHours: Int = 24,
+            currentForecastHours: Int = 24
         ) {
             self.reportsTransportErrors = reportsTransportErrors
             self.pressureKind = pressureKind
@@ -48,6 +56,8 @@ public actor OpenMeteoClient {
             self.forecastDiskCacheDirectory = forecastDiskCacheDirectory
             self.pressureBaselineKey = pressureBaselineKey
             self.pressureBaselineSuiteName = pressureBaselineSuiteName
+            self.currentPastHours = currentPastHours
+            self.currentForecastHours = currentForecastHours
         }
     }
 
@@ -87,12 +97,17 @@ public actor OpenMeteoClient {
 
     // MARK: - Current conditions
 
-    /// Current weather for a coordinate (cached for `currentCacheLifetime`).
+    /// Current weather for a coordinate (cached for `currentCacheLifetime`), with
+    /// hourly pressure / wind from `currentPastHours` before to `currentForecastHours`
+    /// after now.
     public func currentWeather(latitude: Double, longitude: Double) async throws -> CurrentWeather {
         let key = CoordinateKey.make(latitude, longitude, decimals: 3)
         if let cached = await currentCache.value(for: key) { return cached }
 
-        guard let url = OpenMeteoRequest.currentURL(latitude: latitude, longitude: longitude) else {
+        guard let url = OpenMeteoRequest.currentURL(
+            latitude: latitude, longitude: longitude,
+            pastHours: configuration.currentPastHours, forecastHours: configuration.currentForecastHours
+        ) else {
             throw WeatherError.invalidResponse
         }
         let (data, response) = try await loader.loadData(from: url)

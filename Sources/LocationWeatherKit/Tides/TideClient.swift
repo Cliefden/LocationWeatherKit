@@ -35,6 +35,14 @@ public actor TideClient {
         /// see `TransportError.isTransportError`) are not passed to `errorReporter`
         /// (e.g. an offline NOAA attempt that fell back to the model).
         public var reportsTransportErrors: Bool
+        /// Fewest NOAA high/low events a response must contain to be used (else
+        /// the model is tried). 2 by default (Sextant); Lunker accepted 1.
+        public var minimumNOAAEvents: Int
+        /// Consulted by `fetchTides` when the caller passes no `preferredStationID`:
+        /// the user's saved station pick for a coordinate (Lunker's
+        /// `TideStationPreference.stationId(latitude:longitude:)`), or nil for the
+        /// nearest. Lets every call site honour the pick without passing it.
+        public var preferredStationLookup: (@Sendable (_ latitude: Double, _ longitude: Double) -> String?)?
 
         public init(
             applicationName: String,
@@ -46,9 +54,13 @@ public actor TideClient {
             includeNOAAHourlyHeights: Bool = true,
             marineForecastDays: Int = 3,
             minimumModelSamples: Int = 6,
-            reportsTransportErrors: Bool = true
+            reportsTransportErrors: Bool = true,
+            minimumNOAAEvents: Int = 2,
+            preferredStationLookup: (@Sendable (_ latitude: Double, _ longitude: Double) -> String?)? = nil
         ) {
             self.reportsTransportErrors = reportsTransportErrors
+            self.minimumNOAAEvents = minimumNOAAEvents
+            self.preferredStationLookup = preferredStationLookup
             self.applicationName = applicationName
             self.maxStationDistanceKm = maxStationDistanceKm
             self.cacheLifetime = cacheLifetime
@@ -116,15 +128,19 @@ public actor TideClient {
 
     // MARK: - Fetch
 
+    /// - Parameter preferredStationID: The station to use when it exists in the
+    ///   index. nil asks `configuration.preferredStationLookup` (when set), else
+    ///   the nearest station within `maxStationDistanceKm` is used.
     public func fetchTides(
         latitude: Double,
         longitude: Double,
         preferredStationID: String? = nil
     ) async throws -> TideData {
         let coordinateKey = CoordinateKey.make(latitude, longitude, decimals: 3)
+        let preferred = preferredStationID ?? configuration.preferredStationLookup?(latitude, longitude)
 
         // NOAA first. Any failure falls through to the model.
-        if let match = station(latitude: latitude, longitude: longitude, preferredStationID: preferredStationID) {
+        if let match = station(latitude: latitude, longitude: longitude, preferredStationID: preferred) {
             let noaaKey = "\(coordinateKey)|noaa|\(match.id)"
             if let cached = await cache.value(for: noaaKey) { return cached }
             do {
@@ -178,8 +194,8 @@ public actor TideClient {
         let hilo = try await hiloTask
         let hourly = await hourlyTask
         let events = hilo.compactMap { p in p.kind.map { TideEvent(kind: $0, time: p.time, heightMeters: p.height) } }
-        // A real 3-day window has ~6 extremes; fewer than 2 is not usable.
-        guard events.count >= 2 else { throw TideError.invalidResponse }
+        // A real 3-day window has ~6 extremes; fewer than 2 (by default) is not usable.
+        guard !events.isEmpty, events.count >= configuration.minimumNOAAEvents else { throw TideError.invalidResponse }
 
         let samples = hourly.isEmpty
             ? events.map { TideSample(time: $0.time, height: $0.heightMeters) }
