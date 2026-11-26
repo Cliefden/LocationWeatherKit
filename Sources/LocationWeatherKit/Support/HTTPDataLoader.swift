@@ -90,4 +90,24 @@ public enum GeoDistance {
             + cos(lat1 * r) * cos(lat2 * r) * sin(dLon / 2) * sin(dLon / 2)
         return 6371.0 * 2 * atan2(h.squareRoot(), (1 - h).squareRoot())
     }
+
+    /// The point `distanceKm` along the great circle leaving (`latitude`,
+    /// `longitude`) on `bearing` (degrees clockwise from true north), on a
+    /// 6371 km sphere. The returned longitude is in [−180, 180).
+    public static func destination(
+        latitude: Double,
+        longitude: Double,
+        bearing: Double,
+        distanceKm: Double
+    ) -> (latitude: Double, longitude: Double) {
+        let r = Double.pi / 180
+        let delta = distanceKm / 6371.0
+        let theta = bearing * r
+        let phi1 = latitude * r
+        let lambda1 = longitude * r
+        let phi2 = asin(sin(phi1) * cos(delta) + cos(phi1) * sin(delta) * cos(theta))
+        let lambda2 = lambda1 + atan2(sin(theta) * sin(delta) * cos(phi1), cos(delta) - sin(phi1) * sin(phi2))
+        let lon = (lambda2 / r + 540).truncatingRemainder(dividingBy: 360) - 180
+        return (phi2 / r, lon)
+    }
 }

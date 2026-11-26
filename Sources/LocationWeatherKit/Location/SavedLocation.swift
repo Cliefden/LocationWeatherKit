@@ -38,6 +38,15 @@ public struct SavedLocation: Codable, Identifiable, Equatable, Hashable, Sendabl
         timeZoneIdentifier.flatMap { TimeZone(identifier: $0) }
     }
 
+    /// The zone to compute and show this place's times in. It is never nil:
+    /// the device zone for the GPS entry (the user is standing there), then the
+    /// stored IANA zone (DST-aware), then `TimeZone.approximate(forLongitude:)`
+    /// for places whose zone hasn't been resolved yet.
+    public var resolvedTimeZone: TimeZone {
+        if isCurrentLocation { return .current }
+        return timeZone ?? .approximate(forLongitude: longitude)
+    }
+
     /// The name persisted for a GPS entry without a resolved place name. It is
     /// stored untranslated (it is data) — show `displayName`, not `name`.
     public static let currentLocationPlaceholderName = "Current Location"

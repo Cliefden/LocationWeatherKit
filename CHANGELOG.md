@@ -2,6 +2,30 @@
 
 0.1.x releases are additive: code written against 0.1.0 compiles and behaves the same.
 
+## 0.1.3 (2026-11-26)
+
+Moves code that Equinox kept three copies of (app, widget, watch) into the package.
+
+### Added
+
+- `SavedLocationStore.persistedSelection(defaults:configuration:)` and
+  `persistedLocations(defaults:configuration:)`: nonisolated, read-only access to what the store
+  persisted, for `TimelineProvider`s, complications and background tasks that can't create the
+  `@MainActor` store. Same selection rule as `selectedLocation` (stored id, else first); missing
+  or corrupt data reads as empty / nil. `load()` now shares their decoding.
+- `TimeZone.approximate(forLongitude:)`: a fixed-offset zone at 15° per hour (no DST). Non-finite
+  input returns `.current`.
+- `SavedLocation.resolvedTimeZone`: the device zone for the GPS entry, else the stored IANA zone,
+  else `TimeZone.approximate(forLongitude:)`. Never nil.
+- `GeoDistance.destination(latitude:longitude:bearing:distanceKm:)`: great-circle destination
+  point (6371 km sphere), longitude normalized to [−180, 180).
+- Tests: `ReadOnlyAccessTests` (persisted selection, zone fallback, destination).
+
+### Compatibility
+
+- Nothing existing changes. An app's own `TimeZone.approximate(forLongitude:)` (Equinox) shadows
+  the package's until it is deleted.
+
 ## 0.1.2 (2026-11-26)
 
 Gaps found in a behavioural diff against Lunker's current location / weather / tide code

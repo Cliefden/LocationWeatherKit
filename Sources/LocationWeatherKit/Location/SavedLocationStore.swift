@@ -117,24 +117,60 @@ public final class SavedLocationStore {
     /// Re-reads from UserDefaults. A corrupt store is reported and left empty
     /// (better than crashing); a stale selected id falls back to the first entry.
     public func load() {
-        if let data = defaults.data(forKey: configuration.locationsKey) {
-            do {
-                locations = try JSONDecoder().decode([SavedLocation].self, from: data)
-            } catch {
-                errorReporter?("locations.load", error)
-                locations = []
-            }
-        } else {
+        do {
+            locations = try Self.decodeLocations(defaults: defaults, configuration: configuration)
+        } catch {
+            errorReporter?("locations.load", error)
             locations = []
         }
+        selectedLocationId = Self.selectedID(in: locations, defaults: defaults, configuration: configuration)
+    }
 
+    // MARK: - Read-only access (widgets, complications, background tasks)
+
+    /// The saved locations as persisted, without creating a store. Not
+    /// main-actor isolated, so a `TimelineProvider`, a complication or a
+    /// background task can call it directly. Missing or corrupt data reads as
+    /// an empty list.
+    nonisolated public static func persistedLocations(
+        defaults: UserDefaults,
+        configuration: Configuration = Configuration()
+    ) -> [SavedLocation] {
+        (try? decodeLocations(defaults: defaults, configuration: configuration)) ?? []
+    }
+
+    /// The persisted selection, using the same rule as `selectedLocation`: the
+    /// stored id, or the first location when that id is missing or stale. Nil
+    /// only when nothing is saved. Not main-actor isolated (see
+    /// `persistedLocations`).
+    nonisolated public static func persistedSelection(
+        defaults: UserDefaults,
+        configuration: Configuration = Configuration()
+    ) -> SavedLocation? {
+        let locations = persistedLocations(defaults: defaults, configuration: configuration)
+        let id = selectedID(in: locations, defaults: defaults, configuration: configuration)
+        return locations.first { $0.id == id }
+    }
+
+    nonisolated private static func decodeLocations(
+        defaults: UserDefaults,
+        configuration: Configuration
+    ) throws -> [SavedLocation] {
+        guard let data = defaults.data(forKey: configuration.locationsKey) else { return [] }
+        return try JSONDecoder().decode([SavedLocation].self, from: data)
+    }
+
+    nonisolated private static func selectedID(
+        in locations: [SavedLocation],
+        defaults: UserDefaults,
+        configuration: Configuration
+    ) -> UUID? {
         if let idString = defaults.string(forKey: configuration.selectedIDKey),
            let id = UUID(uuidString: idString),
            locations.contains(where: { $0.id == id }) {
-            selectedLocationId = id
-        } else {
-            selectedLocationId = locations.first?.id
+            return id
         }
+        return locations.first?.id
     }
 
     /// In-memory seed for an empty store (e.g. a `SCREENSHOT_MODE` build's demo

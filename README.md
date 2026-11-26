@@ -68,6 +68,11 @@ store.select(id) / deleteLocation(id) / deleteLocation(at:) / moveLocation(from:
 await store.resolveMissingTimeZones()          // launch-time backfill
 store.seedIfEmpty([.lakeTahoe])                // 0.1.2: in-memory seed (SCREENSHOT_MODE), not saved, no onChange
 
+// 0.1.3: read-only, nonisolated: for TimelineProviders, complications and background tasks
+let selected = SavedLocationStore.persistedSelection(defaults: groupDefaults)   // stored id, else first, else nil
+let all = SavedLocationStore.persistedLocations(defaults: groupDefaults)        // [] when missing or corrupt
+selected?.resolvedTimeZone      // device zone for GPS, else IANA zone, else TimeZone.approximate(forLongitude:)
+
 let search = LocationSearch()                  // .init(configuration: .init(minimumQueryLength: 2, resultLimit: 8, region: …))
 search.search(text)                            // debounced 300 ms; observe results / isSearching / errorMessage
 TextField("Search", text: $search.query)       // 0.1.2: `query` is settable; pair with
@@ -169,6 +174,13 @@ if let hit = await cache.value(for: key) { … }
 let value = try await cache.value(for: key) { try await compute() }   // concurrent callers share one fetch
 ```
 
+### GeoDistance
+
+```swift
+GeoDistance.haversineKm(lat1, lon1, lat2, lon2)                               // great-circle km
+GeoDistance.destination(latitude:longitude:bearing:distanceKm:)              // 0.1.3: point along a bearing; lon in [−180, 180)
+```
+
 ## Behavioral differences between the Lunker and Sextant copies (and which one was kept)
 
 | Topic | Lunker | Sextant | Package |
@@ -250,6 +262,9 @@ What Lunker users can still notice with that configuration:
 | `Models/LocationStore.swift` | `SavedLocationStore(defaults: UserDefaults(suiteName: "group.com.equinox.shared")!, configuration: .init(reusesSavedPlaceForFirstFix: true))` + `LocationSearch` | `hasCompletedOnboarding` / `completeOnboarding()` (key `hasCompletedOnboarding`) stay in the app. Call them after add or GPS update, or from `onChange`. The load-time zone backfill becomes `await store.resolveMissingTimeZones()` at launch. Note that the package also resolves the GPS entry, which Equinox skipped. Cache clearing goes in `onTimeZoneResolved`. The `location.removed` analytics wraps `deleteLocation`. A stale selected id now falls back to the first entry (Equinox kept a dangling id). |
 | `Models/SavedLocation.swift` | Package types | Keep `static let stockholm` as an extension. `currentLocation(...)` now stores the untranslated placeholder, and `displayName` localizes it. Names saved in a localized form earlier still display as stored. |
 | `Models/EventDataCache.swift` | `TTLCache<DayLocationKey, T>(ttl: 300)` | `get(date:…)` / `set` → `value(for: DayLocationKey(...))` / `set(_:for:)`. `clear()` → `removeAll()`. |
+| Widget `loadSelectedLocation()` copies, `EquinoxLocations.persistedSelection()` (0.1.3) | `SavedLocationStore.persistedSelection(defaults:)` | Keep the Stockholm fallback in the app; `nil` means nothing is saved. |
+| `Models/TimeZone+Approximate.swift`, widget `approximateTimeZone`/`localTimeZone` (0.1.3) | `TimeZone.approximate(forLongitude:)`, `SavedLocation.resolvedTimeZone` | Delete the app copies (an app copy with the same signature shadows the package's). `approximateTimeZone` → `resolvedTimeZone`. |
+| `SunsetQualityForecaster.destination(...)` (0.1.3) | `GeoDistance.destination(latitude:longitude:bearing:distanceKm:)` | Same formula and radius. |
 
 ## Otta divergence notes (adopt selectively; don't force)
 
