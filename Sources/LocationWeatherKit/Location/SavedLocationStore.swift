@@ -137,6 +137,18 @@ public final class SavedLocationStore {
         }
     }
 
+    /// In-memory seed for an empty store (e.g. a `SCREENSHOT_MODE` build's demo
+    /// spot): sets `locations` and selects the first, without saving or calling
+    /// `onChange` — nothing is persisted until the next edit saves. Does nothing
+    /// (returns false) when the store already has locations or `seed` is empty.
+    @discardableResult
+    public func seedIfEmpty(_ seed: [SavedLocation]) -> Bool {
+        guard locations.isEmpty, !seed.isEmpty else { return false }
+        locations = seed
+        selectedLocationId = seed.first?.id
+        return true
+    }
+
     // MARK: - Editing
 
     /// Adds and selects `location`. Returns false when a named place at (nearly)

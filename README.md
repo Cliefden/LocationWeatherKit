@@ -42,6 +42,7 @@ location.effectiveLocation                    // fix ?? defaultLocation (nil whe
 location.isAuthorized / isAccessDenied / isLoading / errorMessage
 location.onAuthorizationChange = { old, new in /* permission telemetry */ }
 location.onError = { AppLog.reportError("location.fix", $0) }   // .locationUnknown already filtered out
+location.reportsLocationUnknownErrors = true  // 0.1.2: pass .locationUnknown to onError too (Lunker's telemetry)
 ```
 
 `currentLocation()` prompts for permission when the status is undetermined and waits
@@ -65,9 +66,12 @@ store.addLocation(result)                      // Bool: false = duplicate, which
 store.updateCurrentLocation(latitude:longitude:select:)
 store.select(id) / deleteLocation(id) / deleteLocation(at:) / moveLocation(from:to:) / updateLocation(_:)
 await store.resolveMissingTimeZones()          // launch-time backfill
+store.seedIfEmpty([.lakeTahoe])                // 0.1.2: in-memory seed (SCREENSHOT_MODE), not saved, no onChange
 
 let search = LocationSearch()                  // .init(configuration: .init(minimumQueryLength: 2, resultLimit: 8, region: …))
 search.search(text)                            // debounced 300 ms; observe results / isSearching / errorMessage
+TextField("Search", text: $search.query)       // 0.1.2: `query` is settable; pair with
+    .onChange(of: search.query) { search.search($1) }   // (setting it alone doesn't search; clear() resets it)
 let hits = try await LocationSearch.results(for: "Göteborg")   // one-shot
 
 let name = await PlaceNameResolver.placeName(latitude: lat, longitude: lon)   // water body first
@@ -86,11 +90,13 @@ let weather = OpenMeteoClient(
 )
 let now = try await weather.currentWeather(latitude: lat, longitude: lon)   // 15 min cache per ~100 m
 now.pressure; now.pressureTrend; now.windGustsKnots; now.beaufortForce; now.windForecast; now.weatherIcon
+now.pressureHistory   // hourly, 24 h back … 24 h ahead; 0.1.2: .init(currentPastHours:currentForecastHours:) (Lunker: 24 / 72)
 
 let forecast = try await weather.forecast(latitude: lat, longitude: lon, days: 14)  // 3 h cache, coalesced, stale ≤24 h offline
 forecast.hourly; forecast.daily; forecast.snapshot(at: catchDate)?.pressureTrend
 forecast.pressureKind; forecast.pressureHistory   // follow `pressureKind` (.surface → surface_pressure); MSL by default
 forecast.hourly[0].pressure(of: .surface); snapshot.selectedPressure                 // `pressure` stays MSL
+WeatherSnapshot.at(catchDate, from: hourlySamples)                                   // 0.1.2: same rule on a bare series
 PressureTrend.calculate(currentPressure:history:readings:now:)                       // the pure rule
 
 // Field subset, e.g. a router sampling a grid of cells (hourly wind only, no daily block; cached per subset):
@@ -117,7 +123,15 @@ data.nextEvent(after: .now); data.state(at: .now); data.heightRange
 TideData.findExtremes(in: samples)
 tides.nearbyStations(latitude: lat, longitude: lon)          // picker list, sync, bundled index
 // TideError.notCoastal → hide tide UI
+
+// 0.1.2: let every fetchTides call honour the user's saved station pick, and
+// accept a NOAA answer with a single high/low (Lunker's rules):
+TideClient(configuration: .init(applicationName: "Lunker", maxStationDistanceKm: 50, minimumNOAAEvents: 1,
+                                preferredStationLookup: { TideStationPreference.stationId(latitude: $0, longitude: $1) }))
 ```
+
+An explicit `preferredStationID` argument wins over `preferredStationLookup`; a lookup
+returning nil means "nearest".
 
 ### TidalCurrentClient
 
@@ -166,8 +180,8 @@ let value = try await cache.value(for: key) { try await compute() }   // concurr
 | Cloud cover | yes | no | Superset (optional) |
 | Compass text | Localized (catalog keys) | English array | Localized from the package catalog. `Compass.englishAbbreviations` is available too. |
 | `findExtremes` | Parabola through the real timestamps (correct when a null hour left a gap) | Assumes equal spacing (uses the next interval only) | **Lunker's**. A test covers unequal spacing. |
-| NOAA station list | mdapi download at runtime, 30-day disk cache, 50 km auto radius, user override | Bundled JSON index, 25 km | **Sextant's bundled index** as a package resource. Lunker's override is a `preferredStationID` parameter; its picker uses `nearbyStations`. `NOAAStationIndex.decodeMDAPI` remains for regenerating the list. The radius is configurable (default 25). |
-| NOAA request | hilo plus hourly, −12 h, 84 h, `apiError` handling, H/HH/L/LL | hilo only, −6 h, 78 h, trims whitespace | **Superset**: Lunker's window and hourly heights (`includeNOAAHourlyHeights` can be turned off), plus Sextant's whitespace trim. At least 2 events are required (Sextant; Lunker required 1). |
+| NOAA station list | mdapi download at runtime, 30-day disk cache, 50 km auto radius, user override | Bundled JSON index, 25 km | **Sextant's bundled index** as a package resource. Lunker's override is a `preferredStationID` parameter; its picker uses `nearbyStations`. `NOAAStationIndex.decodeMDAPI` remains for regenerating the list. The radius is configurable (default 25). Checked against the live mdapi list on 2026-11-26: same 3,502 ids, and every bundled `name` equals Lunker's `displayName` ("name, ST"). |
+| NOAA request | hilo plus hourly, −12 h, 84 h, `apiError` handling, H/HH/L/LL | hilo only, −6 h, 78 h, trims whitespace | **Superset**: Lunker's window and hourly heights (`includeNOAAHourlyHeights` can be turned off), plus Sextant's whitespace trim. At least 2 events are required by default (Sextant); `minimumNOAAEvents: 1` is Lunker's rule (0.1.2). When hourly heights are unavailable `samples` holds the hi/lo points (Lunker left it empty; it never reads `samples`). |
 | Inland memo | Expires after 24 h, set only for all-null answers, checked after the NOAA attempt | Permanent, set on any sparse answer, checked first | **Lunker's** |
 | Marine decode error | `.decodingFailed` | raw error | Lunker's |
 | `TideSource` | `.noaa(station:distanceKm:)` / `.model` | `.noaaStation(id:name:distanceKm:)` / `.openMeteoModel`, plus `isModelEstimate`, `datumLabel` | Lunker's shape plus Sextant's accessors |
@@ -184,16 +198,33 @@ All apps keep the existing UserDefaults keys and `SavedLocation` JSON shape, so 
 
 ### Lunker
 
+Needs 0.1.2 for an unchanged experience (72 h pressure chart, station pick everywhere,
+single-event NOAA answers, `location.fix` telemetry, in-memory screenshot seed, bindable search text).
+
 | Replace | With | Call-site edits |
 |---|---|---|
-| `Models/LocationManager.swift` | `LocationProvider(defaultLatitude: 59.3293, defaultLongitude: 18.0686)` | `currentLocation` / `latitude` / `longitude` (non-optional) → `effectiveLocation!.coordinate…`. Move `AppLog.reportError("location.fix")` into `onError`. |
-| `Models/LocationStore.swift` | `SavedLocationStore` + `LocationSearch` | Move `updateWidgetData()` (App Group write, `hasPublishedWidgetData` de-dupe, `WatchSync.push`, `WidgetCenter.reload`) into an app `onChange` handler. Search state: `searchResults` → `search.results`, `searchError` → `search.errorMessage`, `clearSearch()` → `clear()`. Keep the `SCREENSHOT_MODE` Lake Tahoe seed in the app. |
-| `Models/SavedLocation.swift` (struct + `LocationSearchResult`) | Package types | Keep the `AppGroup` / `WatchSyncKey` enums and `extension SavedLocation { static let lakeTahoe, stockholm }` in the app. `LocationSearchResult.timeZone` is still available (computed). |
-| `Models/PlaceNameResolver.swift` `placeName` | `PlaceNameResolver.placeName` | `migrateCurrentLocationNames(in:)` (SwiftData) stays in the app and calls the package. |
-| `Models/WeatherService.swift` | `OpenMeteoClient(configuration: .init(pressureBaselineKey: "lunker.weather.pressureBaselines"))` | `fetchWeather` → `currentWeather`. `WeatherService.WeatherData` → `CurrentWeather`, `.PressureTrend` → `PressureTrend` (`icon` → `symbolName`), `.PressureSample` → `PressureSample`. `WeatherService.pressureTrend(…readings: [(…)])` → `PressureTrend.calculate(…readings: [PressureSample])`. Removing the legacy `lunker.weather.lastPressure*` keys stays in the app. |
-| `Models/WeatherForecast.swift` `WeatherForecastService` and `HourlyConditionsSnapshot` | `forecast(…, days: 14)` with `forecastDiskCacheDirectory`; `WeatherForecast.snapshot(at:)` | `HourlyWeatherSample` keeps Lunker's field names (superset), so `WeatherModifier.dailyConditions` compiles unchanged. Disk-cache file names change, so expect one refetch. |
-| `Models/TideService.swift` and `Models/NOAATides.swift` (`NOAATideClient`, `NOAATideStation`, `TideSource`) | `TideClient(configuration: .init(applicationName: "Lunker", maxStationDistanceKm: 50))` | Pass `TideStationPreference.stationId(…)` as `preferredStationID`. `NOAATideClient.shared.nearbyStations` (async throws) → `tides.nearbyStations` (sync). `NOAATideStation` → `NOAAStation`. `TideService.TideKind/TideEvent/TideState/TideData/TideError` → top-level types. `samples` tuples → `TideSample`. `heightDisplay` → app extension over `UnitSettings`. The station list no longer downloads; it uses the bundled index, and its names include the state ("…, CA"). |
+| `Models/LocationManager.swift` | `LocationProvider(defaultLatitude: 59.3293, defaultLongitude: 18.0686)` + `onError = { AppLog.reportError("location.fix", $0) }` + `reportsLocationUnknownErrors = true` | `currentLocation` / `latitude` / `longitude` (non-optional) → `effectiveLocation!.coordinate…` (or a two-line app extension). `location`, `authorizationStatus`, `hasLocation`, `isLoading`, `errorMessage`, `requestPermission()`, `requestLocation()` keep their names. |
+| `Models/LocationStore.swift` | `SavedLocationStore(configuration: .init(resolvesTimeZonesOnAdd: false), errorReporter: { AppLog.reportError($0, $1, logger: AppLog.persistence) })` + `LocationSearch(errorReporter: { AppLog.reportError($0, $1) })` | Move `updateWidgetData()` (App Group write, `hasPublishedWidgetData` de-dupe, `WatchSync.push`, `AppGroup.store.reloadWidgets()`) into an app `onChange` handler; MainTabView's direct calls call the same app function. `isFirstLaunch` → `isEmpty`. Search: `searchQuery` → `search.query` (bindable), `searchResults` → `search.results`, `searchError` → `search.errorMessage`, `clearSearch()` → `clear()`. `SCREENSHOT_MODE`: `store.seedIfEmpty([.lakeTahoe])` (not persisted, like Lunker's seed). |
+| `Models/SavedLocation.swift` (struct + `LocationSearchResult`) | Package types | Keep the `AppGroup` / `WatchSyncKey` enums and `extension SavedLocation { static let lakeTahoe, stockholm }` in the app. JSON keys and the `.sortedKeys` widget payload bytes are identical (tested). `LocationSearchResult.timeZone` is still available (computed). The widget, watch app and watch widget targets must link the package. |
+| `Models/PlaceNameResolver.swift` `placeName` | `PlaceNameResolver.placeName` | `migrateCurrentLocationNames(in:)` + `legacyCurrentLocationName` (SwiftData) stay in the app; rename the app enum (e.g. `CatchPlaceNameMigration`) or call `LocationWeatherKit.PlaceNameResolver` — an app type of the same name shadows the package's. |
+| `Models/WeatherService.swift` | One shared `OpenMeteoClient(configuration: .init(forecastDiskCacheDirectory: URL.cachesDirectory.appending(path: "WeatherForecast", directoryHint: .isDirectory), pressureBaselineKey: "lunker.weather.pressureBaselines", currentForecastHours: 72), errorReporter: { AppLog.reportError($0, $1) })` | `fetchWeather` → `currentWeather`. `WeatherService.WeatherData` → `CurrentWeather`, `.PressureTrend` → `PressureTrend` (`icon` → `symbolName`), `.PressureSample` → `PressureSample`. `WeatherService.pressureTrend(…readings: [(…)])` → `PressureTrend.calculate(…readings: [PressureSample])`. `FishingCondition`, `fishingCondition`, `fishingNote` and removing the legacy `lunker.weather.lastPressure*` keys stay in the app. Baselines carry over (same key and format, tested). |
+| `Models/WeatherForecast.swift` `WeatherForecastService` and `HourlyConditionsSnapshot` | the same client's `forecast(…, days: 14)`; `WeatherForecast.snapshot(at:)` / `WeatherSnapshot.at(_:from:)` | `HourlyWeatherSample` keeps Lunker's field names (superset), so `WeatherModifier.dailyConditions` compiles unchanged; `dailyConditions(latitude:longitude:timeZone:)` and `forecastDays = 14` stay in the app as a thin wrapper over `forecast.hourly`. Disk-cache file names and format change, so expect one refetch. |
+| `Models/TideService.swift` and `Models/NOAATides.swift` (`NOAATideClient`, `NOAATideStation`, `TideSource`) | One shared `TideClient(configuration: .init(applicationName: "Lunker", maxStationDistanceKm: 50, minimumNOAAEvents: 1, preferredStationLookup: { TideStationPreference.stationId(latitude: $0, longitude: $1) }), errorReporter: { AppLog.reportError($0, $1) })` | `TideStationPreference` stays in the app (key `lunker.tides.stationOverrides`); with the lookup, `fetchTides` call sites need no change. `NOAATideClient.shared.nearbyStations` (async throws) → `tides.nearbyStations` (sync, 120 km / 12). `NOAATideClient.NearbyStation` → `NOAAStationMatch`, `NOAATideStation` → `NOAAStation`. `TideService.TideKind/TideEvent/TideState/TideData/TideError` → top-level types (`icon` → `symbolName`). `samples` tuples → `TideSample`. `heightDisplay` → app extension over `UnitSettings`. The station list no longer downloads; the bundled index has the same stations and display names. |
 | `Views/LocationPickerMenu.swift` | stays | Change the type to `SavedLocationStore` and call `store.select(id)` (analytics stays). |
+
+What Lunker users can still notice with that configuration:
+
+- One forecast refetch after the update: the old `Caches/WeatherForecast/<lat>,<lon>.json` files
+  (`{fetchedAt, samples}`) are not read; the package writes `<lat>,<lon>_14.json`. Offline on
+  the first launch after updating, there is no stale forecast to fall back on. The old files and
+  `Caches/noaa-tide-stations.json` are orphaned (the app may delete them once).
+- The current-conditions request also asks for `surface_pressure`, gusts and hourly wind (unused by
+  Lunker; a slightly larger response). Coordinates outside ±90/±180 now fail fast as `invalidResponse`.
+- Clearing the search text also clears a shown search error (Lunker kept it).
+- Telemetry: the reported error value for `tides.decode` / `weatherForecast.decode` is the package's
+  `TideError.decodingFailed` / `WeatherError.decodingFailed` instead of the raw `DecodingError`
+  (operation names unchanged). Station-list download failures (`tides.noaa`,
+  `tides.noaaStationCacheWrite`) no longer occur.
 
 ### Sextant
 
