@@ -1,0 +1,9 @@
+{"type":"FeatureCollection","features":[
+{"type":"Feature","properties":{"monitoring_location_id":"USGS-01646500","parameter_code":"00065","time":"2026-10-27T10:00:00+00:00","value":"3.50"},"geometry":{"type":"Point","coordinates":[-77.1276,38.9498]}},
+{"type":"Feature","properties":{"monitoring_location_id":"USGS-01646500","parameter_code":"00060","time":"2026-10-27T10:00:00+00:00","value":"2140"},"geometry":{"type":"Point","coordinates":[-77.1276,38.9498]}},
+{"type":"Feature","properties":{"monitoring_location_id":"USGS-01646500","parameter_code":"00010","time":"2026-10-27T09:45:00+00:00","value":"12.1"},"geometry":{"type":"Point","coordinates":[-77.1276,38.9498]}},
+{"type":"Feature","properties":{"monitoring_location_id":"USGS-01648000","parameter_code":"00060","time":"2026-03-19T14:15:00+00:00","value":"81.7"},"geometry":{"type":"Point","coordinates":[-77.04,38.9725]}},
+{"type":"Feature","properties":{"monitoring_location_id":"USGS-01651800","parameter_code":"00010","time":"2026-10-27T10:00:00+00:00","value":"11.0"},"geometry":{"type":"Point","coordinates":[-76.9433,38.9013]}},
+{"type":"Feature","properties":{"monitoring_location_id":"USGS-01652500","parameter_code":"00060","time":"2026-10-27T11:00:00.000+00:00","value":"33.7"},"geometry":{"type":"Point","coordinates":[-77.0859,38.8433]}},
+{"type":"Feature","properties":{"monitoring_location_id":"USGS-09999999","parameter_code":"00060","time":"2026-10-27T11:00:00+00:00","value":null},"geometry":{"type":"Point","coordinates":[-77.0,38.9]}}
+],"numberReturned":7}

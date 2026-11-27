@@ -2,6 +2,32 @@
 
 0.1.x releases are additive: code written against 0.1.0 compiles and behaves the same.
 
+## 0.1.4 (2026-11-27)
+
+Past conditions and water data, for Lunker's catch log and water card.
+
+### Added
+
+- `OpenMeteoClient.historicalWeather(latitude:longitude:around:)`: hourly weather for the UTC
+  day before through the day after a past moment (use `snapshot(at:)`), from the
+  historical-forecast API (2022 on) or the ERA5 archive (earlier). Cached per ~1 km and UTC day.
+  URL builder: `OpenMeteoRequest.historicalURL(latitude:longitude:around:now:)`.
+- `TideClient.fetchTides(latitude:longitude:around:preferredStationID:)`: tides for the 52 hours
+  around a past or future moment (NOAA window, else the dated sea-level model). Not cached.
+  URL builder: `OpenMeteoMarineRequest.seaLevelURL(latitude:longitude:from:to:)`.
+- `MarineConditionsClient` / `MarineConditions` / `MarineConditionsRequest`: current sea-surface
+  temperature and wave height (Open-Meteo Marine); nil inland. Cached per ~1 km for an hour.
+- `USGSWaterClient` / `RiverGauge` / `FlowTrend` / `USGSWaterRequest`: the nearest live USGS
+  stream gauge within 25 km (discharge, gauge height, water temperature, 24 h trend, station
+  name) from the USGS Water Data OGC API — the replacement for WaterServices, which USGS retires
+  on 2027-02-22. US only; readings older than 6 h are ignored. Cached for 30 minutes.
+- Tests: `WaterTests` (USGS URLs, parsing, nearest-gauge choice, trend, caching; marine parsing;
+  past weather endpoints and day ranges; past tide windows).
+
+### Compatibility
+
+- Nothing existing changes. `fetchNOAA` gained optional window arguments (internal).
+
 ## 0.1.3 (2026-11-26)
 
 Moves code that Equinox kept three copies of (app, widget, watch) into the package.

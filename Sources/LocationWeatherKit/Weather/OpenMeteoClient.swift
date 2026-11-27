@@ -67,6 +67,8 @@ public actor OpenMeteoClient {
     private let now: @Sendable () -> Date
     private let currentCache: TTLCache<String, CurrentWeather>
     private let forecastCache: TTLCache<String, WeatherForecast>
+    /// Past weather barely changes; a day is plenty.
+    private let historicalCache: TTLCache<String, WeatherForecast>
     private var baselines: PressureBaselineStore
 
     /// - Parameters:
@@ -85,6 +87,7 @@ public actor OpenMeteoClient {
         self.now = now
         self.currentCache = TTLCache(ttl: configuration.currentCacheLifetime, now: now)
         self.forecastCache = TTLCache(ttl: configuration.forecastCacheLifetime, now: now)
+        self.historicalCache = TTLCache(ttl: 86_400, now: now)
         let defaults: UserDefaults? = configuration.pressureBaselineKey == nil
             ? nil
             : configuration.pressureBaselineSuiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
@@ -350,6 +353,31 @@ public actor OpenMeteoClient {
             daily: daily,
             pressureKind: pressureKind
         )
+    }
+
+    // MARK: - Past weather
+
+    /// Hourly weather around a past moment (the UTC day before through the day
+    /// after), e.g. to fill in the conditions of a catch logged afterwards. Use
+    /// `snapshot(at:)` on the result. Cached in memory per ~1 km and UTC day.
+    /// Throws `WeatherError.invalidResponse` for a future date.
+    public func historicalWeather(latitude: Double, longitude: Double, around date: Date) async throws -> WeatherForecast {
+        let key = "\(CoordinateKey.make(latitude, longitude, decimals: 2))|\(OpenMeteoRequest.utcDay(date))"
+        if let cached = await historicalCache.value(for: key) { return cached }
+        guard let url = OpenMeteoRequest.historicalURL(latitude: latitude, longitude: longitude, around: date, now: now()) else {
+            throw WeatherError.invalidResponse
+        }
+        let (data, response) = try await loader.loadData(from: url)
+        guard HTTPStatus.isSuccess(response) else { throw WeatherError.invalidResponse }
+        let weather: WeatherForecast
+        do {
+            weather = try Self.parseForecast(data, pressureKind: configuration.pressureKind, fetchedAt: now())
+        } catch {
+            report("weatherHistory.decode", error)
+            throw error
+        }
+        await historicalCache.set(weather, for: key)
+        return weather
     }
 
     // MARK: Errors
