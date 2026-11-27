@@ -75,6 +75,51 @@ public enum OpenMeteoRequest {
         return url(items)
     }
 
+    // MARK: Past weather
+
+    /// Recorded model runs from 2022 on, available up to today.
+    public static let historicalForecastEndpoint = "https://historical-forecast-api.open-meteo.com/v1/forecast"
+    /// ERA5 reanalysis (1940 on, a few days behind), for dates before `historicalForecastStart`.
+    public static let archiveEndpoint = "https://archive-api.open-meteo.com/v1/archive"
+    /// 2022-01-01T00:00:00Z — the first day `historicalForecastEndpoint` covers.
+    public static let historicalForecastStart = Date(timeIntervalSince1970: 1_640_995_200)
+
+    /// Hourly weather (the `forecastHourlyFields`, no daily block) for the UTC
+    /// day before `date` through the day after it — wide enough for a snapshot
+    /// and its pressure trend at any hour of the local day. The end is clamped
+    /// to `now`'s day. Dates from 2022 on use the historical-forecast API,
+    /// older ones the ERA5 archive. nil for a future `date` or invalid coordinates.
+    public static func historicalURL(
+        latitude: Double,
+        longitude: Double,
+        around date: Date,
+        now: Date = Date()
+    ) -> URL? {
+        guard isValid(latitude: latitude, longitude: longitude), date <= now.addingTimeInterval(3600) else { return nil }
+        let start = date.addingTimeInterval(-86_400)
+        let end = min(date.addingTimeInterval(86_400), now)
+        let endpoint = date >= historicalForecastStart ? historicalForecastEndpoint : archiveEndpoint
+        var components = URLComponents(string: endpoint)
+        components?.queryItems = [
+            URLQueryItem(name: "latitude", value: String(latitude)),
+            URLQueryItem(name: "longitude", value: String(longitude)),
+            URLQueryItem(name: "hourly", value: forecastHourlyFields.joined(separator: ",")),
+            URLQueryItem(name: "start_date", value: utcDay(start)),
+            URLQueryItem(name: "end_date", value: utcDay(end)),
+            URLQueryItem(name: "timeformat", value: "unixtime"),
+            URLQueryItem(name: "timezone", value: "auto"),
+        ]
+        return components?.url
+    }
+
+    /// "yyyy-MM-dd" of `date` in UTC.
+    static func utcDay(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 1970, c.month ?? 1, c.day ?? 1)
+    }
+
     static func isValid(latitude: Double, longitude: Double) -> Bool {
         latitude.isFinite && longitude.isFinite && (-90...90).contains(latitude) && (-180...180).contains(longitude)
     }

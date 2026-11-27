@@ -132,6 +132,21 @@ public enum OpenMeteoMarineRequest {
         return components?.url
     }
 
+    /// Sea level for the UTC days `from`…`to` (past dates included).
+    public static func seaLevelURL(latitude: Double, longitude: Double, from: Date, to: Date) -> URL? {
+        guard OpenMeteoRequest.isValid(latitude: latitude, longitude: longitude), from <= to else { return nil }
+        var components = URLComponents(string: endpoint)
+        components?.queryItems = [
+            URLQueryItem(name: "latitude", value: String(latitude)),
+            URLQueryItem(name: "longitude", value: String(longitude)),
+            URLQueryItem(name: "hourly", value: "sea_level_height_msl"),
+            URLQueryItem(name: "start_date", value: OpenMeteoRequest.utcDay(from)),
+            URLQueryItem(name: "end_date", value: OpenMeteoRequest.utcDay(to)),
+            URLQueryItem(name: "timezone", value: "GMT"),
+        ]
+        return components?.url
+    }
+
     /// Parsed marine payload: the non-null samples, plus whether every value was
     /// null (the definite "inland" answer).
     public struct SeaLevel: Sendable, Hashable {

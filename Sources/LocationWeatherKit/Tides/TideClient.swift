@@ -164,6 +164,40 @@ public actor TideClient {
         return data
     }
 
+    /// Tides for the 52 hours around a past (or future) moment, e.g. the tide
+    /// state when a catch was made. Same source order as `fetchTides`: the
+    /// preferred or nearest NOAA station, else the Open-Meteo sea-level model.
+    /// Not cached; throws `TideError.notCoastal` inland.
+    public func fetchTides(
+        latitude: Double,
+        longitude: Double,
+        around date: Date,
+        preferredStationID: String? = nil
+    ) async throws -> TideData {
+        let preferred = preferredStationID ?? configuration.preferredStationLookup?(latitude, longitude)
+        let begin = date.addingTimeInterval(-26 * 3600)
+        if let match = station(latitude: latitude, longitude: longitude, preferredStationID: preferred) {
+            do {
+                return try await fetchNOAA(match, begin: begin, hours: 52)
+            } catch {
+                report("tides.noaa", error)
+            }
+        }
+        guard let url = OpenMeteoMarineRequest.seaLevelURL(
+            latitude: latitude, longitude: longitude, from: begin, to: date.addingTimeInterval(26 * 3600)
+        ) else { throw TideError.invalidResponse }
+        let (data, response) = try await loader.loadData(from: url)
+        guard HTTPStatus.isSuccess(response) else { throw TideError.invalidResponse }
+        let seaLevel = try OpenMeteoMarineRequest.parseSeaLevel(data)
+        guard seaLevel.samples.count >= configuration.minimumModelSamples else { throw TideError.notCoastal }
+        return TideData(
+            events: TideData.findExtremes(in: seaLevel.samples),
+            samples: seaLevel.samples,
+            fetchedAt: now(),
+            source: .model
+        )
+    }
+
     public func clearCache() async {
         await cache.removeAll()
         inlandUntil.removeAll()
@@ -176,9 +210,9 @@ public actor TideClient {
 
     // MARK: NOAA
 
-    private func fetchNOAA(_ match: NOAAStationMatch) async throws -> TideData {
-        let begin = now().addingTimeInterval(-configuration.noaaLookback)
-        let hours = configuration.noaaRangeHours
+    private func fetchNOAA(_ match: NOAAStationMatch, begin: Date? = nil, hours: Int? = nil) async throws -> TideData {
+        let begin = begin ?? now().addingTimeInterval(-configuration.noaaLookback)
+        let hours = hours ?? configuration.noaaRangeHours
         let app = configuration.applicationName
         guard let hiloURL = NOAATideRequest.predictionsURL(
             stationID: match.id, interval: .hilo, begin: begin, hours: hours, application: app
